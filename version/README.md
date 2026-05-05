@@ -1,6 +1,6 @@
 # version
 
-版本信息管理工具包。支持通过编译时 `-ldflags` 注入版本信息，并提供多种格式化输出方法。
+版本信息管理工具包。支持通过编译时 `-ldflags` 注入版本信息，并自动从 `debug.ReadBuildInfo()` 检测 VCS 信息。
 
 ## 安装
 
@@ -15,21 +15,17 @@ go get github.com/lyonmu/gopkg/version
 在 Makefile 中定义注入参数：
 
 ```makefile
-VERSION   ?= $(shell git describe --tags --always --dirty)
-BRANCH    ?= $(shell git rev-parse --abbrev-ref HEAD)
-REVISION  ?= $(shell git rev-parse HEAD)
-BUILDUSER ?= $(shell whoami)
-BUILDDATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+BRANCH   ?= $(shell git rev-parse --abbrev-ref HEAD)
+REVISION ?= $(shell git rev-parse HEAD)
 
-LDFLAGS := -X github.com/lyonmu/gopkg/version.Version=$(VERSION) \
-           -X github.com/lyonmu/gopkg/version.Branch=$(BRANCH) \
-           -X github.com/lyonmu/gopkg/version.Revision=$(REVISION) \
-           -X github.com/lyonmu/gopkg/version.BuildUser=$(BUILDUSER) \
-           -X github.com/lyonmu/gopkg/version.BuildDate=$(BUILDDATE)
+LDFLAGS := -X github.com/lyonmu/gopkg/version.Branch=$(BRANCH) \
+           -X github.com/lyonmu/gopkg/version.Revision=$(REVISION)
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o myapp ./cmd/myapp
 ```
+
+> `Revision` 可不注入，会自动从 `debug.ReadBuildInfo()` 的 VCS 信息中获取。
 
 ### 2. 代码中使用
 
@@ -46,27 +42,24 @@ import (
 func main() {
 	// 简洁格式输出
 	fmt.Println(version.Info())
-	// (version=1.0.0, branch=main, revision=abc123)
+	// (branch=main, revision=abc123)
 
 	// 完整格式输出
 	fmt.Println(version.Print("myapp"))
-	// myapp, version 1.0.0 (branch: main, revision: abc123)
-	//   build user:       developer
-	//   build date:       2026-05-05
-	//   go version:       go1.24.0
-	//   platform:         linux/amd64
-	//   tags:             netgo
+	// myapp, (branch: main, revision: abc123)
+	// go version:	go1.24.0
+	// platform:	linux/amd64
+	// tags:	netgo
 
 	// 构建上下文
 	fmt.Println(version.BuildContext())
-	// (go=go1.24.0, platform=linux/amd64, user=developer, date=2026-05-05, tags=netgo)
+	// (go=go1.24.0, platform=linux/amd64, tags=netgo)
 
 	// 结构化日志
 	logger := slog.Default()
 	logger.Info("Starting server", version.Slog()...)
 
 	// 自动检测 revision 和 tags
-	// 如果未通过 -ldflags 注入 Revision，会自动从 debug.ReadBuildInfo() 获取
 	fmt.Println(version.GetRevision()) // abc123def 或 abc123def-modified
 	fmt.Println(version.GetTags())     // netgo 或 unknown
 }
@@ -78,11 +71,8 @@ func main() {
 
 | 变量 | 说明 | 示例值 |
 |------|------|--------|
-| `Version` | 语义化版本号 | `1.0.0` |
 | `Revision` | Git 提交哈希，留空则自动从 `debug.ReadBuildInfo()` 获取 | `abc123def` |
 | `Branch` | Git 分支名 | `main` |
-| `BuildUser` | 构建执行者 | `developer` |
-| `BuildDate` | 构建日期 | `2026-05-05T10:30:00Z` |
 
 `GoVersion`、`GoOS`、`GoArch` 在运行时自动获取，无需注入。
 
@@ -99,12 +89,10 @@ func main() {
 go build -o myapp ./cmd/myapp
 
 ./myapp --version
-# myapp, version  (branch: , revision: abc123def)
-#   build user:       
-#   build date:       
-#   go version:       go1.24.0
-#   platform:         linux/amd64
-#   tags:             unknown
+# myapp, (branch: , revision: abc123def)
+# go version:	go1.24.0
+# platform:	linux/amd64
+# tags:	unknown
 ```
 
 ## Print 输出格式
@@ -112,12 +100,10 @@ go build -o myapp ./cmd/myapp
 `Print(program)` 使用预编译模板输出多行版本信息：
 
 ```
-{{program}}, version {{version}} (branch: {{branch}}, revision: {{revision}})
-  build user:       {{buildUser}}
-  build date:       {{buildDate}}
-  go version:       {{goVersion}}
-  platform:         {{platform}}
-  tags:             {{tags}}
+{{program}}, (branch: {{branch}}, revision: {{revision}})
+go version:	{{goVersion}}
+platform:	{{platform}}
+tags:	{{tags}}
 ```
 
 ## API 参考
@@ -126,14 +112,11 @@ go build -o myapp ./cmd/myapp
 
 ```go
 var (
-	Version   string // 版本号
-	Revision  string // Git revision
-	Branch    string // Git 分支
-	BuildUser string // 构建用户
-	BuildDate string // 构建日期
-	GoVersion string // Go 运行时版本（自动获取）
-	GoOS      string // 操作系统（自动获取）
-	GoArch    string // CPU 架构（自动获取）
+	Revision  string // Git revision，可通过 -ldflags 注入
+	Branch    string // Git 分支，可通过 -ldflags 注入
+	GoVersion string // Go 运行时版本（自动获取，默认 runtime.Version()）
+	GoOS      string // 操作系统（自动获取，默认 runtime.GOOS）
+	GoArch    string // CPU 架构（自动获取，默认 runtime.GOARCH）
 )
 ```
 
@@ -141,9 +124,28 @@ var (
 
 | 函数 | 说明 |
 |------|------|
-| `Print(program string) string` | 返回完整的版本信息，使用模板格式化 |
-| `Info() string` | 返回简短版本信息 `(version=..., branch=..., revision=...)` |
-| `BuildContext() string` | 返回构建上下文信息 |
-| `Slog() []any` | 返回 key-value 对切片，用于结构化日志 |
+| `Print(program string) string` | 返回完整版本信息，使用模板格式化 |
+| `Info() string` | 返回简短版本信息 `(branch=..., revision=...)` |
+| `BuildContext() string` | 返回构建上下文 `(go=..., platform=..., tags=...)` |
+| `Slog() []any` | 返回 5 对 key-value，用于结构化日志 |
 | `GetRevision() string` | 获取 revision，优先使用注入值，否则返回运行时计算值（带 `-modified` 后缀） |
 | `GetTags() string` | 返回编译时的 build tags |
+
+### Slog 返回的键值对
+
+```go
+[]any{
+	"revision",  GetRevision(),
+	"branch",    Branch,
+	"goversion", GoVersion,
+	"goos",      GoOS,
+	"goarch",    GoArch,
+}
+```
+
+用法示例：
+
+```go
+logger.Info("server starting", version.Slog()...)
+// 输出: {"level":"info","msg":"server starting","revision":"abc123","branch":"main","goversion":"go1.24.0","goos":"linux","goarch":"amd64"}
+```

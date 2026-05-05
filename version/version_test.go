@@ -6,11 +6,8 @@ import (
 )
 
 func resetVersionState() {
-	Version = ""
 	Branch = ""
 	Revision = ""
-	BuildUser = ""
-	BuildDate = ""
 	GoVersion = "go1.24.0"
 	GoOS = "linux"
 	GoArch = "amd64"
@@ -45,7 +42,6 @@ func TestInfo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Cleanup(resetVersionState)
-			Version = tt.version
 			Branch = tt.branch
 			Revision = tt.revision
 			computedRevision = "" // ensure empty revision case is truly empty
@@ -78,8 +74,6 @@ func TestBuildContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Cleanup(resetVersionState)
-			BuildUser = tt.buildUser
-			BuildDate = tt.buildDate
 			got := BuildContext()
 			// 仅验证格式，不验证具体 runtime 值
 			if !strings.HasPrefix(got, "(go=") || !strings.HasSuffix(got, ")") {
@@ -163,12 +157,8 @@ func TestGetTags(t *testing.T) {
 
 func TestPrint(t *testing.T) {
 	t.Cleanup(resetVersionState)
-	// 设置已知值
-	Version = "2.0.0"
 	Branch = "develop"
 	Revision = "def456"
-	BuildUser = "builder"
-	BuildDate = "2026-01-01"
 	computedRevision = "computed-rev"
 
 	got := Print("myapp")
@@ -192,11 +182,8 @@ func TestPrint(t *testing.T) {
 
 func TestSlog(t *testing.T) {
 	t.Cleanup(resetVersionState)
-	Version = "1.2.3"
 	Branch = "main"
 	Revision = "sha123"
-	BuildUser = "user"
-	BuildDate = "today"
 	GoVersion = "go1.24.0"
 	GoOS = "linux"
 	GoArch = "amd64"

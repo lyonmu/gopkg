@@ -11,11 +11,8 @@ import (
 
 // Build information. Populated at build-time.
 var (
-	Version   string
 	Revision  string
 	Branch    string
-	BuildUser string
-	BuildDate string
 	GoVersion = runtime.Version()
 	GoOS      = runtime.GOOS
 	GoArch    = runtime.GOARCH
@@ -25,23 +22,18 @@ var (
 )
 
 // printTmpl is the pre-compiled template used by Print.
-var printTmpl = template.Must(template.New("version").Parse(`{{.program}}, version {{.version}} (branch: {{.branch}}, revision: {{.revision}})
-  build user:       {{.buildUser}}
-  build date:       {{.buildDate}}
-  go version:       {{.goVersion}}
-  platform:         {{.platform}}
-  tags:             {{.tags}}
+var printTmpl = template.Must(template.New("version").Parse(`{{.program}}, (branch: {{.branch}}, revision: {{.revision}})
+go version:	{{.goVersion}}
+platform:	{{.platform}}
+tags:	{{.tags}}
 `))
 
 // Print returns version information formatted with the given program name.
 func Print(program string) string {
 	m := map[string]string{
 		"program":   program,
-		"version":   Version,
 		"revision":  GetRevision(),
 		"branch":    Branch,
-		"buildUser": BuildUser,
-		"buildDate": BuildDate,
 		"goVersion": GoVersion,
 		"platform":  GoOS + "/" + GoArch,
 		"tags":      GetTags(),
@@ -56,12 +48,12 @@ func Print(program string) string {
 
 // Info returns version, branch and revision information.
 func Info() string {
-	return fmt.Sprintf("(version=%s, branch=%s, revision=%s)", Version, Branch, GetRevision())
+	return fmt.Sprintf("(branch=%s, revision=%s)", Branch, GetRevision())
 }
 
 // BuildContext returns goVersion, platform, buildUser and buildDate information.
 func BuildContext() string {
-	return fmt.Sprintf("(go=%s, platform=%s, user=%s, date=%s, tags=%s)", GoVersion, GoOS+"/"+GoArch, BuildUser, BuildDate, GetTags())
+	return fmt.Sprintf("(go=%s, platform=%s, tags=%s)", GoVersion, GoOS+"/"+GoArch, GetTags())
 }
 
 // Slog returns a slice of key-value pairs for use with structured logging.
@@ -71,11 +63,8 @@ func BuildContext() string {
 //	logger.Info("Starting server", version.Slog()...)
 func Slog() []any {
 	return []any{
-		"version", Version,
 		"revision", GetRevision(),
 		"branch", Branch,
-		"builduser", BuildUser,
-		"builddate", BuildDate,
 		"goversion", GoVersion,
 		"goos", GoOS,
 		"goarch", GoArch,
