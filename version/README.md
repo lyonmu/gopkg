@@ -65,9 +65,10 @@ func main() {
 	logger := slog.Default()
 	logger.Info("Starting server", version.Slog()...)
 
-	// User-Agent 字符串
-	ua := version.ComponentUserAgent("MyApp")
-	fmt.Println(ua) // MyApp/1.0.0
+	// 自动检测 revision 和 tags
+	// 如果未通过 -ldflags 注入 Revision，会自动从 debug.ReadBuildInfo() 获取
+	fmt.Println(version.GetRevision()) // abc123def 或 abc123def-modified
+	fmt.Println(version.GetTags())     // netgo 或 unknown
 }
 ```
 
@@ -84,6 +85,40 @@ func main() {
 | `BuildDate` | 构建日期 | `2026-05-05T10:30:00Z` |
 
 `GoVersion`、`GoOS`、`GoArch` 在运行时自动获取，无需注入。
+
+## 自动检测机制
+
+当未通过 `-ldflags` 注入 `Revision` 时，`GetRevision()` 会自动从 `debug.ReadBuildInfo()` 中读取 VCS 信息：
+
+- **vcs.revision** — Git 提交哈希
+- **vcs.modified** — 如果有未提交的修改，会在 revision 后追加 `-modified` 后缀
+- **-tags** — 编译时使用的 build tags
+
+```bash
+# 直接 go build（无 -ldflags）
+go build -o myapp ./cmd/myapp
+
+./myapp --version
+# myapp, version  (branch: , revision: abc123def)
+#   build user:       
+#   build date:       
+#   go version:       go1.24.0
+#   platform:         linux/amd64
+#   tags:             unknown
+```
+
+## Print 输出格式
+
+`Print(program)` 使用预编译模板输出多行版本信息：
+
+```
+{{program}}, version {{version}} (branch: {{branch}}, revision: {{revision}})
+  build user:       {{buildUser}}
+  build date:       {{buildDate}}
+  go version:       {{goVersion}}
+  platform:         {{platform}}
+  tags:             {{tags}}
+```
 
 ## API 参考
 
@@ -110,6 +145,5 @@ var (
 | `Info() string` | 返回简短版本信息 `(version=..., branch=..., revision=...)` |
 | `BuildContext() string` | 返回构建上下文信息 |
 | `Slog() []any` | 返回 key-value 对切片，用于结构化日志 |
-| `GetRevision() string` | 获取 revision，优先使用注入值，否则返回运行时计算值 |
+| `GetRevision() string` | 获取 revision，优先使用注入值，否则返回运行时计算值（带 `-modified` 后缀） |
 | `GetTags() string` | 返回编译时的 build tags |
-| `ComponentUserAgent(component string) string` | 生成 `component/Version` 格式的 User-Agent 字符串 |

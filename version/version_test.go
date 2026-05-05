@@ -59,17 +59,17 @@ func TestInfo(t *testing.T) {
 
 func TestBuildContext(t *testing.T) {
 	tests := []struct {
-		name     string
+		name      string
 		buildUser string
 		buildDate string
 	}{
 		{
-			name:     "empty values",
+			name:      "empty values",
 			buildUser: "",
 			buildDate: "",
 		},
 		{
-			name:     "with values",
+			name:      "with values",
 			buildUser: "testuser",
 			buildDate: "2026-05-05",
 		},
@@ -230,38 +230,5 @@ func TestSlog(t *testing.T) {
 		if val != want {
 			t.Errorf("Slog()[%d] = %v, want value %v", i*2+1, val, want)
 		}
-	}
-}
-
-func TestComponentUserAgent(t *testing.T) {
-	tests := []struct {
-		name      string
-		component string
-		version   string
-		want      string
-	}{
-		{
-			name:      "with version",
-			component: "MyApp",
-			version:   "3.0.0",
-			want:      "MyApp/3.0.0",
-		},
-		{
-			name:      "empty version",
-			component: "MyApp",
-			version:   "",
-			want:      "MyApp/",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(resetVersionState)
-			Version = tt.version
-			got := ComponentUserAgent(tt.component)
-			if got != tt.want {
-				t.Errorf("ComponentUserAgent(%q) = %q, want %q", tt.component, got, tt.want)
-			}
-		})
 	}
 }

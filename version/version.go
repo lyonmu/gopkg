@@ -96,11 +96,6 @@ func GetTags() string {
 	return computedTags
 }
 
-// ComponentUserAgent returns a User-Agent string in the format "component/Version".
-func ComponentUserAgent(component string) string {
-	return component + "/" + Version
-}
-
 func init() {
 	computedRevision, computedTags = computeRevision()
 }
