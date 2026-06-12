@@ -18,24 +18,21 @@ func resetVersionState() {
 func TestInfo(t *testing.T) {
 	tests := []struct {
 		name     string
-		version  string
 		branch   string
 		revision string
 		want     string
 	}{
 		{
 			name:     "empty values",
-			version:  "",
 			branch:   "",
 			revision: "",
-			want:     "(version=, branch=, revision=)",
+			want:     "(branch=, revision=)",
 		},
 		{
 			name:     "with values",
-			version:  "1.0.0",
 			branch:   "main",
 			revision: "abc123",
-			want:     "(version=1.0.0, branch=main, revision=abc123)",
+			want:     "(branch=main, revision=abc123)",
 		},
 	}
 
@@ -55,37 +52,27 @@ func TestInfo(t *testing.T) {
 
 func TestBuildContext(t *testing.T) {
 	tests := []struct {
-		name      string
-		buildUser string
-		buildDate string
+		name string
+		tags string
 	}{
 		{
-			name:      "empty values",
-			buildUser: "",
-			buildDate: "",
+			name: "empty tags",
+			tags: "",
 		},
 		{
-			name:      "with values",
-			buildUser: "testuser",
-			buildDate: "2026-05-05",
+			name: "with tags",
+			tags: "netgo,osusergo",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Cleanup(resetVersionState)
+			computedTags = tt.tags
 			got := BuildContext()
-			// 仅验证格式，不验证具体 runtime 值
-			if !strings.HasPrefix(got, "(go=") || !strings.HasSuffix(got, ")") {
-				t.Errorf("BuildContext() unexpected format: %q", got)
-			}
-			if tt.buildUser != "" {
-				if !strings.Contains(got, "testuser") {
-					t.Errorf("BuildContext() missing build user; got: %q", got)
-				}
-				if !strings.Contains(got, "2026-05-05") {
-					t.Errorf("BuildContext() missing build date; got: %q", got)
-				}
+			want := "(go=go1.24.0, platform=linux/amd64, tags=" + tt.tags + ")"
+			if got != want {
+				t.Errorf("BuildContext() = %q, want %q", got, want)
 			}
 		})
 	}
@@ -166,13 +153,11 @@ func TestPrint(t *testing.T) {
 	// 验证关键字段都出现在输出中
 	for _, want := range []string{
 		"myapp",
-		"2.0.0",
 		"develop",
 		"def456", // Revision 非空，GetRevision 返回 Revision
-		"builder",
-		"2026-01-01",
 		"go version:",
 		"platform:",
+		"tags:",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Print() output missing %q; got:\n%s", want, got)
@@ -190,15 +175,14 @@ func TestSlog(t *testing.T) {
 
 	got := Slog()
 
-	// Slog 返回 []any，长度应为 16 (8 对 key-value)
-	if len(got) != 16 {
-		t.Fatalf("Slog() returned %d elements, want 16", len(got))
+	// Slog 返回 []any，长度应为 10 (5 对 key-value)
+	if len(got) != 10 {
+		t.Fatalf("Slog() returned %d elements, want 10", len(got))
 	}
 
 	// 验证 key 的顺序和内容
 	wantKeys := []string{
-		"version", "revision", "branch", "builduser",
-		"builddate", "goversion", "goos", "goarch",
+		"revision", "branch", "goversion", "goos", "goarch",
 	}
 	for i, want := range wantKeys {
 		key := got[i*2]
@@ -209,8 +193,7 @@ func TestSlog(t *testing.T) {
 
 	// 验证 value 的顺序和内容
 	wantValues := []any{
-		"1.2.3", "sha123", "main", "user",
-		"today", "go1.24.0", "linux", "amd64",
+		"sha123", "main", "go1.24.0", "linux", "amd64",
 	}
 	for i, want := range wantValues {
 		val := got[i*2+1]

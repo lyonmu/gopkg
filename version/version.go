@@ -51,7 +51,7 @@ func Info() string {
 	return fmt.Sprintf("(branch=%s, revision=%s)", Branch, GetRevision())
 }
 
-// BuildContext returns goVersion, platform, buildUser and buildDate information.
+// BuildContext returns Go version, platform and build tags information.
 func BuildContext() string {
 	return fmt.Sprintf("(go=%s, platform=%s, tags=%s)", GoVersion, GoOS+"/"+GoArch, GetTags())
 }
