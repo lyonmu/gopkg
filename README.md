@@ -10,6 +10,7 @@ gopkg/
 ├── version/   # 版本信息管理
 ├── id/        # 分布式唯一 ID 生成器
 ├── structx/   # struct 操作工具
+├── viper/     # 配置加载和动态监听工具
 └── ...        # 持续收集中...
 ```
 
@@ -21,6 +22,7 @@ gopkg/
 | [version](version/README.md) | 版本信息管理，支持编译时注入 |
 | [id](id/README.md) | 分布式唯一 ID 生成器，基于 Sonyflake 算法 |
 | [structx](structx/README.md) | struct 操作工具，支持转 map、差异比较、属性赋值 |
+| [viper](viper/README.md) | 配置加载和动态监听工具，支持泛型配置管理和错误通道 |
 
 ## 安装
 
