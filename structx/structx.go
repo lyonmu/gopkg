@@ -32,8 +32,8 @@ func DiffStruct(dst, src any) (map[string]any, []string, error) {
 
 	result := make(map[string]any)
 	fields := make([]string, 0)
-	dstState := &conversionState{visiting: make(map[visit]struct{})}
-	srcState := &conversionState{visiting: make(map[visit]struct{})}
+	dstState := newConversionState(dst)
+	srcState := newConversionState(src)
 
 	for i := 0; i < dstType.NumField(); i++ {
 		dstField := dstVal.Field(i)
@@ -125,6 +125,15 @@ type visit struct {
 
 type conversionState struct {
 	visiting map[visit]struct{}
+}
+
+func newConversionState(v any) *conversionState {
+	state := &conversionState{visiting: make(map[visit]struct{})}
+	value := reflect.ValueOf(v)
+	if value.IsValid() && value.Kind() == reflect.Ptr && !value.IsNil() {
+		state.visiting[visit{typ: value.Type(), ptr: value.Pointer()}] = struct{}{}
+	}
+	return state
 }
 
 // dereference 安全解引用指针。如果是指针且为 nil，返回零值 + true。
@@ -276,7 +285,5 @@ func StructToMap(v any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return structToMapValue(val, 0, &conversionState{
-		visiting: make(map[visit]struct{}),
-	}), nil
+	return structToMapValue(val, 0, newConversionState(v)), nil
 }
