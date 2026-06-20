@@ -24,6 +24,63 @@ func TestDefaultConfigCreatesConsoleLoggerWithoutFileOutput(t *testing.T) {
 	}
 }
 
+func TestNewDefault(t *testing.T) {
+	log, err := NewDefault()
+	if err != nil {
+		t.Fatalf("NewDefault() error = %v", err)
+	}
+	if log == nil {
+		t.Fatal("NewDefault() returned nil logger")
+	}
+}
+
+func TestNewSupportsLevels(t *testing.T) {
+	tests := []struct {
+		name  string
+		level Level
+	}{
+		{name: "debug", level: DebugLevel},
+		{name: "info", level: InfoLevel},
+		{name: "warn", level: WarnLevel},
+		{name: "error", level: ErrorLevel},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Level = tt.level
+
+			log, err := New(cfg)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if log == nil {
+				t.Fatal("New() returned nil logger")
+			}
+		})
+	}
+}
+
+func TestNewReturnsErrorWhenLogDirectoryParentIsFile(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "parent")
+	if err := os.WriteFile(parent, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	cfg := DefaultConfig()
+	cfg.Output.Console.Enabled = false
+	cfg.Output.File.Enabled = true
+	cfg.Output.File.Path = filepath.Join(parent, "logs")
+
+	_, err := New(cfg)
+	if err == nil {
+		t.Fatal("New() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "create log directory") {
+		t.Fatalf("New() error = %q, want it to contain %q", err, "create log directory")
+	}
+}
+
 func TestNewWritesFileWhenFileOutputEnabled(t *testing.T) {
 	dir := t.TempDir()
 	cfg := DefaultConfig()

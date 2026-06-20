@@ -90,14 +90,18 @@ func init() {
 }
 
 func computeRevision() (string, string) {
+	buildInfo, ok := debug.ReadBuildInfo()
+	return computeRevisionFrom(buildInfo, ok)
+}
+
+func computeRevisionFrom(buildInfo *debug.BuildInfo, ok bool) (string, string) {
 	var (
 		rev      = "unknown"
 		tags     = "unknown"
 		modified bool
 	)
 
-	buildInfo, ok := debug.ReadBuildInfo()
-	if !ok {
+	if !ok || buildInfo == nil {
 		return rev, tags
 	}
 	for _, v := range buildInfo.Settings {

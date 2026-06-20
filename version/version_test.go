@@ -1,6 +1,7 @@
 package version
 
 import (
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -137,6 +138,65 @@ func TestGetTags(t *testing.T) {
 			got := GetTags()
 			if got != tt.want {
 				t.Errorf("GetTags() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestComputeRevisionFrom(t *testing.T) {
+	tests := []struct {
+		name         string
+		buildInfo    *debug.BuildInfo
+		ok           bool
+		wantRevision string
+		wantTags     string
+	}{
+		{
+			name:         "unavailable build info",
+			ok:           false,
+			wantRevision: "unknown",
+			wantTags:     "unknown",
+		},
+		{
+			name: "revision and tags",
+			buildInfo: &debug.BuildInfo{
+				Settings: []debug.BuildSetting{
+					{Key: "vcs.revision", Value: "abc123"},
+					{Key: "-tags", Value: "netgo,osusergo"},
+				},
+			},
+			ok:           true,
+			wantRevision: "abc123",
+			wantTags:     "netgo,osusergo",
+		},
+		{
+			name: "modified revision without tags",
+			buildInfo: &debug.BuildInfo{
+				Settings: []debug.BuildSetting{
+					{Key: "vcs.revision", Value: "def456"},
+					{Key: "vcs.modified", Value: "true"},
+				},
+			},
+			ok:           true,
+			wantRevision: "def456-modified",
+			wantTags:     "unknown",
+		},
+		{
+			name:         "nil build info reported available",
+			ok:           true,
+			wantRevision: "unknown",
+			wantTags:     "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotRevision, gotTags := computeRevisionFrom(tt.buildInfo, tt.ok)
+			if gotRevision != tt.wantRevision {
+				t.Errorf("computeRevisionFrom() revision = %q, want %q", gotRevision, tt.wantRevision)
+			}
+			if gotTags != tt.wantTags {
+				t.Errorf("computeRevisionFrom() tags = %q, want %q", gotTags, tt.wantTags)
 			}
 		})
 	}
