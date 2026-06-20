@@ -83,7 +83,7 @@ if err != nil {
 }
 
 // 使用环境变量
-gen, err := id.NewSonySnowFlake(func() (int, error) {
+gen, err = id.NewSonySnowFlake(func() (int, error) {
 	mid := os.Getenv("MACHINE_ID")
 	id, err := strconv.Atoi(mid)
 	if err != nil {

@@ -10,7 +10,7 @@ struct 操作工具包，提供 struct 转 map、差异比较、属性赋值等�
 - 输出 key 始终使用 Go 导出字段名，不读取 struct tag
 - 递归深度最大为 10；超过限制的分支返回 `nil`
 - 仅检测当前递归路径中的指针循环，循环分支返回 `nil`
-- `time.Time` 等没有导出字段的值 struct 保留原始值
+- `time.Time` 等声明了字段但没有导出字段的值 struct 保留原始值；零字段 struct 转换为空 map
 
 ## API
 
@@ -25,7 +25,7 @@ struct 操作工具包，提供 struct 转 map、差异比较、属性赋值等�
 | `struct{A [2]int}{A: [2]int{1, 2}}` | `map[string]any{"A": []any{1, 2}}` |
 | `"string"` | `nil, error` |
 
-嵌套 struct、slice、array 和 map 会递归转换。递归最多处理 10 层；超过限制或遇到当前递归路径上的指针循环时，对应分支为 `nil`。共享但不构成当前路径循环的指针会分别正常转换。`time.Time` 以及其他没有导出字段的值 struct 不展开，保留原始值。
+嵌套 struct、slice、array 和 map 会递归转换。递归最多处理 10 层；超过限制或遇到当前递归路径上的指针循环时，对应分支为 `nil`。共享但不构成当前路径循环的指针会分别正常转换。`time.Time` 以及其他声明了字段但没有导出字段的值 struct 不展开，保留原始值；零字段 struct 转换为 `map[string]any{}`。
 
 ### `DiffStruct(dst, src any) (map[string]any, []string, error)`
 
