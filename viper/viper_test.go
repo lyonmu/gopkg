@@ -103,7 +103,12 @@ func waitForConfig(t *testing.T, cm *ConfigManager[testConfig], want testConfig)
 	}
 }
 
-func waitForReloadConfig(t *testing.T, cm *ConfigManager[testConfig], want testConfig) {
+func waitForSymlinkRecovery(
+	t *testing.T,
+	cm *ConfigManager[testConfig],
+	want testConfig,
+	allowedError string,
+) {
 	t.Helper()
 
 	deadline := time.NewTimer(3 * time.Second)
@@ -116,9 +121,26 @@ func waitForReloadConfig(t *testing.T, cm *ConfigManager[testConfig], want testC
 				return
 			}
 		case err := <-cm.Errors():
-			t.Fatalf("unexpected reload error: %v", err)
+			if !strings.Contains(err.Error(), allowedError) {
+				t.Fatalf("unexpected reload error: %v", err)
+			}
 		case <-deadline.C:
 			t.Fatalf("GetConfig() = %#v, want %#v", cm.GetConfig(), want)
+		}
+	}
+}
+
+func drainAllowedErrors(t *testing.T, cm *ConfigManager[testConfig], allowedError string) {
+	t.Helper()
+
+	for {
+		select {
+		case err := <-cm.Errors():
+			if !strings.Contains(err.Error(), allowedError) {
+				t.Fatalf("unexpected reload error: %v", err)
+			}
+		default:
+			return
 		}
 	}
 }
@@ -338,14 +360,14 @@ func TestConfigManagerSymlinkTargetRecovery(t *testing.T) {
 				writeConfig(t, path, "name: [broken\n")
 			},
 			fixTarget: func(t *testing.T, path string) {
-				writeConfig(t, path, "name: recovered\nport: 9090\n")
+				atomicReplaceConfig(t, path, "name: recovered\nport: 9090\n")
 			},
 		},
 		{
 			name:          "missing target",
 			prepareTarget: func(t *testing.T, path string) {},
 			fixTarget: func(t *testing.T, path string) {
-				writeConfig(t, path, "name: recovered\nport: 9090\n")
+				atomicReplaceConfig(t, path, "name: recovered\nport: 9090\n")
 			},
 		},
 	}
@@ -380,22 +402,34 @@ func TestConfigManagerSymlinkTargetRecovery(t *testing.T) {
 			if got := cm.GetConfig(); got != (testConfig{Name: "initial", Port: 8080}) {
 				t.Fatalf("GetConfig() = %#v, want initial config", got)
 			}
-			if session.realConfigFile != initialRealConfigFile {
+			cm.lifecycleMu.Lock()
+			gotRealConfigFile := session.realConfigFile
+			cm.lifecycleMu.Unlock()
+			if gotRealConfigFile != initialRealConfigFile {
 				t.Fatalf(
 					"failed reload committed real config file %q, want %q",
-					session.realConfigFile,
+					gotRealConfigFile,
 					initialRealConfigFile,
 				)
 			}
 
+			drainAllowedErrors(t, cm, "yaml:")
 			tt.fixTarget(t, nextPath)
-			waitForReloadConfig(t, cm, testConfig{Name: "recovered", Port: 9090})
+			waitForSymlinkRecovery(
+				t,
+				cm,
+				testConfig{Name: "recovered", Port: 9090},
+				"yaml:",
+			)
 			realNextPath, err := filepath.EvalSymlinks(nextPath)
 			if err != nil {
 				t.Fatalf("evaluate recovered target: %v", err)
 			}
-			if session.realConfigFile != realNextPath {
-				t.Fatalf("real config file = %q, want %q", session.realConfigFile, realNextPath)
+			cm.lifecycleMu.Lock()
+			gotRealConfigFile = session.realConfigFile
+			cm.lifecycleMu.Unlock()
+			if gotRealConfigFile != realNextPath {
+				t.Fatalf("real config file = %q, want %q", gotRealConfigFile, realNextPath)
 			}
 		})
 	}
@@ -479,6 +513,36 @@ func TestWatchSessionShouldReload(t *testing.T) {
 			got, _ := session.shouldReload(tt.event)
 			if got != tt.want {
 				t.Fatalf("shouldReload() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWatchSessionCloseWithoutStart(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "returns without waiting for watch loop"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			watcher, err := fsnotify.NewWatcher()
+			if err != nil {
+				t.Fatalf("create watcher: %v", err)
+			}
+			session := &watchSession{
+				watcher: watcher,
+				doneCh:  make(chan struct{}),
+				exited:  make(chan struct{}),
+			}
+
+			session.closeWithoutWait()
+
+			select {
+			case <-session.doneCh:
+			default:
+				t.Fatal("closeWithoutWait did not close done channel")
 			}
 		})
 	}

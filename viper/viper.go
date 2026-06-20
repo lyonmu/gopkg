@@ -41,11 +41,15 @@ type watchSession struct {
 	closeOnce      sync.Once
 }
 
-func (session *watchSession) closeAndWait() {
+func (session *watchSession) closeWithoutWait() {
 	session.closeOnce.Do(func() {
 		close(session.doneCh)
 		_ = session.watcher.Close()
 	})
+}
+
+func (session *watchSession) closeAndWait() {
+	session.closeWithoutWait()
 	<-session.exited
 }
 
@@ -80,12 +84,11 @@ func (cm *ConfigManager[T]) LoadConfig(path string, filetype string) error {
 	if err != nil {
 		return err
 	}
-	go cm.watchLoop(session)
 
 	cm.lifecycleMu.Lock()
 	if cm.closed || cm.generation != generation || cm.session != currentSession {
 		cm.lifecycleMu.Unlock()
-		session.closeAndWait()
+		session.closeWithoutWait()
 		return ErrAlreadyClosed
 	}
 
@@ -93,6 +96,7 @@ func (cm *ConfigManager[T]) LoadConfig(path string, filetype string) error {
 	cm.session = session
 	cm.generation++
 	cm.updateConfig(cfg)
+	go cm.watchLoop(session)
 	cm.lifecycleMu.Unlock()
 
 	if oldSession != nil {
