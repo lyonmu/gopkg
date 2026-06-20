@@ -20,24 +20,34 @@ gopkg/
 ├── go.mod
 ├── go.sum
 ├── LICENSE
-├── <pkg>/                 # 子包目录（每个工具函数一个包）
+├── <pkg>/                # 子包目录（按功能域或职责划分）
 │   ├── <pkg>.go          # 实现文件
 │   ├── <pkg>_test.go     # 测试文件
 │   └── README.md         # 该包的 API 文档和用法示例
-└── docs/                  # 临时文档目录（gitignored，不提交）
+└── docs/                 # 文档目录
 ```
 
 ## Structure Conventions
 
-- **每个子包独立目录** — 工具函数集合放在项目根目录下的独立子目录中
+- **每个子包独立目录** — 工具函数按功能域或职责组织在项目根目录下的独立子目录中，例如 `pinyin`、`stringutil`、`sliceutil`
 - **根 `README.md` 只做高层说明** — 项目简介、模块表格（链接到子包 README）、安装命令、许可证
 - **每个子包必须有 `README.md`** — 包含功能说明、API 文档、输入输出示例、用法代码片段
-- **`docs/` 是 gitignored 的** — 不提交到仓库，用于临时文档或草稿
+- **`docs/superpowers/` 应保持为本地目录** — 该目录用于本地 skill、分析工具或临时工作流产生的文档，应通过 `.gitignore` 排除，不提交到仓库
 
 ## Code Conventions
 
-- **Go 1.24.0** 最小版本
-- **错误处理** — 工具函数优先返回零值而非 panic
+- **Go 1.24.0** is the minimum supported version.
+- **Package design** — organize packages by cohesive functionality or domain, not by creating one package per individual function.
+- **Error handling** — prefer explicit `error` returns for recoverable failures. Do not silently swallow errors by returning zero values. Avoid `panic` except for unrecoverable programmer errors.
+- **Public API** — exported functions, types, and constants must have clear comments and stable behavior.
+- **No unnecessary dependencies** — keep utility packages lightweight; avoid adding third-party dependencies unless they provide clear value.
+
+## Local-only Files
+
+- `docs/superpowers/` may be created by local skills, analysis tools, or temporary workflows.
+- `docs/superpowers/` is local-only and must not be added, staged, or committed.
+- Before committing, run `git status --short` and ensure no files under `docs/superpowers/` are included.
+- If content from `docs/superpowers/` should become official documentation, move or rewrite it into a tracked file such as `README.md`, package-level `README.md`, or `AGENTS.md`.
 
 ## Testing
 
@@ -76,7 +86,6 @@ gopkg/
 - scope 使用子包名，全局变更可省略
 - 中文描述，祈使句，首字母不大写，末尾不加句号
 - 不超过 50 个字符
-- docs/ 目录可能由本地 skill、分析工具或临时工作流自动创建，仅用于本地记录、草稿、分析过程或临时文档。该目录允许在本地存在和使用，但默认不属于仓库正式交付内容，不应提交到 Git 仓库。提交代码前必须检查是否误包含 docs/ 目录中的文件；如包含，应从提交中移除。除非用户明确要求将其中某些内容整理为正式项目文档，否则不要把 docs/ 目录加入版本控制。
 
 ### Examples
 

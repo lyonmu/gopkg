@@ -23,7 +23,7 @@
 .idea/
 .vscode/
 .worktrees/
-docs/
+docs/superpowers/
 node_modules/
 dist/
 build/
