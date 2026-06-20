@@ -6,14 +6,26 @@ import (
 	"testing"
 )
 
-func resetVersionState() {
-	Branch = ""
-	Revision = ""
-	GoVersion = "go1.24.0"
-	GoOS = "linux"
-	GoArch = "amd64"
-	computedRevision = ""
-	computedTags = ""
+func restoreVersionState(t *testing.T) {
+	t.Helper()
+
+	originalBranch := Branch
+	originalRevision := Revision
+	originalGoVersion := GoVersion
+	originalGoOS := GoOS
+	originalGoArch := GoArch
+	originalComputedRevision := computedRevision
+	originalComputedTags := computedTags
+
+	t.Cleanup(func() {
+		Branch = originalBranch
+		Revision = originalRevision
+		GoVersion = originalGoVersion
+		GoOS = originalGoOS
+		GoArch = originalGoArch
+		computedRevision = originalComputedRevision
+		computedTags = originalComputedTags
+	})
 }
 
 func TestInfo(t *testing.T) {
@@ -39,7 +51,7 @@ func TestInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(resetVersionState)
+			restoreVersionState(t)
 			Branch = tt.branch
 			Revision = tt.revision
 			computedRevision = "" // ensure empty revision case is truly empty
@@ -68,7 +80,10 @@ func TestBuildContext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(resetVersionState)
+			restoreVersionState(t)
+			GoVersion = "go1.24.0"
+			GoOS = "linux"
+			GoArch = "amd64"
 			computedTags = tt.tags
 			got := BuildContext()
 			want := "(go=go1.24.0, platform=linux/amd64, tags=" + tt.tags + ")"
@@ -102,7 +117,7 @@ func TestGetRevision(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(resetVersionState)
+			restoreVersionState(t)
 			Revision = tt.revision
 			computedRevision = tt.computed
 			got := GetRevision()
@@ -133,7 +148,7 @@ func TestGetTags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(resetVersionState)
+			restoreVersionState(t)
 			computedTags = tt.computed
 			got := GetTags()
 			if got != tt.want {
@@ -203,7 +218,7 @@ func TestComputeRevisionFrom(t *testing.T) {
 }
 
 func TestPrint(t *testing.T) {
-	t.Cleanup(resetVersionState)
+	restoreVersionState(t)
 	Branch = "develop"
 	Revision = "def456"
 	computedRevision = "computed-rev"
@@ -226,7 +241,7 @@ func TestPrint(t *testing.T) {
 }
 
 func TestSlog(t *testing.T) {
-	t.Cleanup(resetVersionState)
+	restoreVersionState(t)
 	Branch = "main"
 	Revision = "sha123"
 	GoVersion = "go1.24.0"
