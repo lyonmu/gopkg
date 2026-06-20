@@ -165,6 +165,9 @@ func fieldToMapValue(v reflect.Value, depth int) interface{} {
 
 	switch derefV.Kind() {
 	case reflect.Struct:
+		if derefV.NumField() == 0 {
+			return structToMapValue(derefV, depth+1)
+		}
 		if !hasExportedField(derefV.Type()) {
 			return safeInterface(derefV)
 		}

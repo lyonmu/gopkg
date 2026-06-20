@@ -64,6 +64,12 @@ func TestStructToMap(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "嵌套空 struct",
+			input:   struct{ Empty struct{} }{},
+			want:    map[string]any{"Empty": map[string]any{}},
+			wantErr: false,
+		},
+		{
 			name:    "slice 字段",
 			input:   struct{ S []int }{S: []int{1, 2, 3}},
 			want:    map[string]any{"S": []any{1, 2, 3}},
