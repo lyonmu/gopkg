@@ -34,7 +34,6 @@ gopkg/
 - **每个子包必须有 `README.md`** — 包含功能说明、API 文档、输入输出示例、用法代码片段
 - **`docs/` 是 gitignored 的** — 不提交到仓库，用于临时文档或草稿
 
-
 ## Code Conventions
 
 - **Go 1.24.0** 最小版本
@@ -62,21 +61,22 @@ gopkg/
 
 ### Types
 
-| Type | 用途 | 示例 |
-|------|------|------|
-| `feat` | 新功能 | `feat(pinyin): 添加小驼峰拼音转换` |
-| `fix` | Bug 修复 | `fix(pinyin): 修复 emoji 过滤不完整` |
-| `docs` | 文档变更 | `docs: 更新 README 模块列表` |
-| `style` | 代码格式（不影响逻辑） | `style: 统一 import 分组` |
+| Type       | 用途                   | 示例                                     |
+| ---------- | ---------------------- | ---------------------------------------- |
+| `feat`     | 新功能                 | `feat(pinyin): 添加小驼峰拼音转换`       |
+| `fix`      | Bug 修复               | `fix(pinyin): 修复 emoji 过滤不完整`     |
+| `docs`     | 文档变更               | `docs: 更新 README 模块列表`             |
+| `style`    | 代码格式（不影响逻辑） | `style: 统一 import 分组`                |
 | `refactor` | 重构（非新功能非 bug） | `refactor(pinyin): 提取 cleanInput 函数` |
-| `test` | 测试相关 | `test(pinyin): 添加边界情况测试` |
-| `chore` | 构建/工具/杂项 | `chore: 更新 go.mod` |
+| `test`     | 测试相关               | `test(pinyin): 添加边界情况测试`         |
+| `chore`    | 构建/工具/杂项         | `chore: 更新 go.mod`                     |
 
 ### Rules
 
 - scope 使用子包名，全局变更可省略
 - 中文描述，祈使句，首字母不大写，末尾不加句号
 - 不超过 50 个字符
+- docs/ 目录可能由本地 skill、分析工具或临时工作流自动创建，仅用于本地记录、草稿、分析过程或临时文档。该目录允许在本地存在和使用，但默认不属于仓库正式交付内容，不应提交到 Git 仓库。提交代码前必须检查是否误包含 docs/ 目录中的文件；如包含，应从提交中移除。除非用户明确要求将其中某些内容整理为正式项目文档，否则不要把 docs/ 目录加入版本控制。
 
 ### Examples
 
