@@ -3,6 +3,7 @@ package structx
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestStructToMap(t *testing.T) {
@@ -63,9 +64,27 @@ func TestStructToMap(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "嵌套空 struct",
+			input:   struct{ Empty struct{} }{},
+			want:    map[string]any{"Empty": map[string]any{}},
+			wantErr: false,
+		},
+		{
 			name:    "slice 字段",
 			input:   struct{ S []int }{S: []int{1, 2, 3}},
 			want:    map[string]any{"S": []any{1, 2, 3}},
+			wantErr: false,
+		},
+		{
+			name:    "非空 array 字段",
+			input:   struct{ A [3]int }{A: [3]int{1, 2, 3}},
+			want:    map[string]any{"A": []any{1, 2, 3}},
+			wantErr: false,
+		},
+		{
+			name:    "空 array 字段",
+			input:   struct{ A [0]int }{},
+			want:    map[string]any{"A": []any{}},
 			wantErr: false,
 		},
 		{
@@ -135,20 +154,235 @@ func TestStructToMap(t *testing.T) {
 	}
 }
 
+func TestStructToMapPointerCycles(t *testing.T) {
+	type node struct {
+		Name string
+		Next *node
+	}
+
+	tests := []struct {
+		name  string
+		input func() *node
+		want  map[string]any
+	}{
+		{
+			name: "self cycle",
+			input: func() *node {
+				root := &node{Name: "root"}
+				root.Next = root
+				return root
+			},
+			want: map[string]any{
+				"Name": "root",
+				"Next": nil,
+			},
+		},
+		{
+			name: "mutual cycle",
+			input: func() *node {
+				first := &node{Name: "first"}
+				second := &node{Name: "second"}
+				first.Next = second
+				second.Next = first
+				return first
+			},
+			want: map[string]any{
+				"Name": "first",
+				"Next": map[string]any{
+					"Name": "second",
+					"Next": nil,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := StructToMap(tt.input())
+			if err != nil {
+				t.Fatalf("StructToMap() error = %v", err)
+			}
+			if got == nil {
+				t.Fatal("StructToMap() returned nil map")
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("StructToMap() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStructToMapDepthLimitBoundary(t *testing.T) {
+	type node struct {
+		Value int
+		Next  *node
+	}
+
+	buildChain := func(depth int) *node {
+		root := &node{}
+		current := root
+		for i := 1; i <= depth; i++ {
+			current.Next = &node{Value: i}
+			current = current.Next
+		}
+		return root
+	}
+	var wantChain func(index, depth int) map[string]any
+	wantChain = func(index, depth int) map[string]any {
+		if index > maxDepth {
+			return map[string]any{
+				"Value": nil,
+				"Next":  nil,
+			}
+		}
+		var next any
+		if index < depth {
+			next = wantChain(index+1, depth)
+		}
+		return map[string]any{
+			"Value": index,
+			"Next":  next,
+		}
+	}
+
+	tests := []struct {
+		name  string
+		depth int
+	}{
+		{
+			name:  "below max depth",
+			depth: maxDepth - 1,
+		},
+		{
+			name:  "at max depth",
+			depth: maxDepth,
+		},
+		{
+			name:  "above max depth",
+			depth: maxDepth + 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := buildChain(tt.depth)
+			first, err := StructToMap(root)
+			if err != nil {
+				t.Fatalf("first StructToMap() error = %v", err)
+			}
+			second, err := StructToMap(root)
+			if err != nil {
+				t.Fatalf("second StructToMap() error = %v", err)
+			}
+
+			want := wantChain(0, tt.depth)
+			if !reflect.DeepEqual(first, want) {
+				t.Fatalf("StructToMap() = %#v, want %#v", first, want)
+			}
+			if !reflect.DeepEqual(first, second) {
+				t.Fatalf("StructToMap() results differ:\nfirst:  %#v\nsecond: %#v", first, second)
+			}
+		})
+	}
+}
+
+func TestStructToMapSharedAndContainerPointers(t *testing.T) {
+	type node struct {
+		Name     string
+		Next     *node
+		Children []*node
+		Lookup   map[string]*node
+	}
+	type siblings struct {
+		Left  *node
+		Right *node
+	}
+
+	shared := &node{Name: "shared"}
+	selfSlice := &node{Name: "slice"}
+	selfSlice.Children = []*node{selfSlice}
+	selfMap := &node{Name: "map"}
+	selfMap.Lookup = map[string]*node{"self": selfMap}
+
+	tests := []struct {
+		name  string
+		input any
+		want  map[string]any
+	}{
+		{
+			name:  "sibling fields share acyclic pointer",
+			input: siblings{Left: shared, Right: shared},
+			want: map[string]any{
+				"Left": map[string]any{
+					"Name":     "shared",
+					"Next":     nil,
+					"Children": nil,
+					"Lookup":   nil,
+				},
+				"Right": map[string]any{
+					"Name":     "shared",
+					"Next":     nil,
+					"Children": nil,
+					"Lookup":   nil,
+				},
+			},
+		},
+		{
+			name:  "cycle through pointer slice",
+			input: selfSlice,
+			want: map[string]any{
+				"Name": "slice",
+				"Next": nil,
+				"Children": []any{
+					nil,
+				},
+				"Lookup": nil,
+			},
+		},
+		{
+			name:  "cycle through pointer map",
+			input: selfMap,
+			want: map[string]any{
+				"Name":     "map",
+				"Next":     nil,
+				"Children": nil,
+				"Lookup": map[string]any{
+					"self": nil,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := StructToMap(tt.input)
+			if err != nil {
+				t.Fatalf("StructToMap() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("StructToMap() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDiffStruct(t *testing.T) {
 	type Inner struct {
 		X int
 		Y string
 	}
 	type Outer struct {
-		Name  string
-		Age   int
-		Inner Inner
-		Ptr   *string
+		Name      string
+		Age       int
+		Inner     Inner
+		Ptr       *string
+		CreatedAt time.Time
 	}
 
 	str1 := "hello"
 	str2 := "world"
+	createdAt := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
 
 	tests := []struct {
 		name       string
@@ -160,9 +394,17 @@ func TestDiffStruct(t *testing.T) {
 	}{
 		{
 			name:       "完全相同",
-			dst:        Outer{Name: "test", Age: 10},
-			src:        Outer{Name: "test", Age: 10},
+			dst:        Outer{Name: "test", Age: 10, CreatedAt: createdAt},
+			src:        Outer{Name: "test", Age: 10, CreatedAt: createdAt},
 			wantFields: []string{},
+			wantErr:    false,
+		},
+		{
+			name:       "time.Time 字段不同",
+			dst:        Outer{CreatedAt: createdAt},
+			src:        Outer{CreatedAt: updatedAt},
+			wantFields: []string{"CreatedAt"},
+			wantValues: map[string]any{"CreatedAt": createdAt},
 			wantErr:    false,
 		},
 		{
@@ -249,6 +491,64 @@ func TestDiffStruct(t *testing.T) {
 						t.Errorf("DiffStruct() got[%q] = %#v, want %#v", k, gotVal, v)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestDiffStructCyclicValues(t *testing.T) {
+	type node struct {
+		Name string
+		Next *node
+	}
+
+	cycle := func(rootName, childName string) *node {
+		root := &node{Name: rootName}
+		child := &node{Name: childName}
+		root.Next = child
+		child.Next = root
+		return root
+	}
+
+	tests := []struct {
+		name       string
+		dst        *node
+		src        *node
+		wantFields []string
+		wantValues map[string]any
+	}{
+		{
+			name:       "equal cycles",
+			dst:        cycle("root", "child"),
+			src:        cycle("root", "child"),
+			wantFields: []string{},
+			wantValues: map[string]any{},
+		},
+		{
+			name:       "different cycles",
+			dst:        cycle("root", "before"),
+			src:        cycle("root", "after"),
+			wantFields: []string{"Next"},
+			wantValues: map[string]any{
+				"Next": map[string]any{
+					"Name": "before",
+					"Next": nil,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotFields, err := DiffStruct(tt.dst, tt.src)
+			if err != nil {
+				t.Fatalf("DiffStruct() error = %v", err)
+			}
+			if !reflect.DeepEqual(gotFields, tt.wantFields) {
+				t.Fatalf("DiffStruct() fields = %v, want %v", gotFields, tt.wantFields)
+			}
+			if !reflect.DeepEqual(got, tt.wantValues) {
+				t.Fatalf("DiffStruct() = %#v, want %#v", got, tt.wantValues)
 			}
 		})
 	}

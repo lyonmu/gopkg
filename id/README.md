@@ -28,9 +28,12 @@ func main() {
 		panic(err)
 	}
 
-	// 生成唯一 ID
-	id := gen.GenID()
-	fmt.Println(id) // 例如: 13835058055282114561
+	// 生成唯一 ID；生成失败时必须处理错误
+	generatedID, err := gen.GenID()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(generatedID)
 }
 ```
 
@@ -40,7 +43,7 @@ func main() {
 
 ```go
 type IDGenerator interface {
-	GenID() int64
+	GenID() (int64, error)
 }
 ```
 
@@ -56,7 +59,7 @@ type IDGenerator interface {
 
 **返回值：**
 - `IDGenerator` — 生成器实例
-- `error` — 创建失败时返回错误（如 machineId 函数报错或返回 0）
+- `error` — 创建失败时返回错误（如 machineId 函数报错或机器 ID 为 0）
 
 **默认配置：**
 
@@ -75,9 +78,12 @@ type IDGenerator interface {
 gen, err := id.NewSonySnowFlake(func() (int, error) {
 	return 42, nil
 })
+if err != nil {
+	return err
+}
 
 // 使用环境变量
-gen, err := id.NewSonySnowFlake(func() (int, error) {
+gen, err = id.NewSonySnowFlake(func() (int, error) {
 	mid := os.Getenv("MACHINE_ID")
 	id, err := strconv.Atoi(mid)
 	if err != nil {
@@ -85,21 +91,33 @@ gen, err := id.NewSonySnowFlake(func() (int, error) {
 	}
 	return id, nil
 })
+if err != nil {
+	return err
+}
 ```
 
-### `GenID() int64`
+同一个机器 ID 只能由一个运行中的生成器实例使用，不能在多个进程或实例中并行复用。
 
-生成下一个唯一 ID。ID 单调递增，在同一时间窗口内通过序列号保证唯一性。
+### `GenID() (int64, error)`
+
+生成下一个 ID。调用方必须检查返回的错误；例如 Sonyflake 时间位耗尽时，不能使用同时返回的 ID。
 
 ```go
-id1 := gen.GenID()
-id2 := gen.GenID()
-// id2 > id1
+id1, err := gen.GenID()
+if err != nil {
+	return err
+}
+
+id2, err := gen.GenID()
+if err != nil {
+	return err
+}
 ```
 
 ## 注意事项
 
-- **机器 ID 唯一性**：集群中每个节点必须使用不同的机器 ID，否则可能生成重复 ID
+- **机器 ID 唯一性**：集群中每个运行中的生成器必须使用不同的机器 ID；相同机器 ID 不能并行使用，否则可能生成重复 ID
 - **机器 ID 范围**：默认 16 bits，取值范围 1-65535
-- **时钟回拨**：Sonyflake 不支持时钟回拨，系统时间倒退时 `GenID()` 会返回 0
-- **ID 大小**：返回的 int64 始终为正数，可安全用于数据库主键
+- **固定时间基准**：默认起始时间固定为 `2025-01-01 00:00:00 UTC`，可降低同一机器 ID 在进程重启后生成重复 ID 的风险
+- **快速重启边界**：默认时间粒度为 10ms；同一机器 ID 在同一个 10ms 时间窗口内快速重启时，固定时间基准不能绝对保证不重复
+- **错误处理**：必须检查 `GenID()` 返回的错误，例如时间位耗尽时不应使用失败调用返回的 ID

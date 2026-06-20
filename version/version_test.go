@@ -1,18 +1,31 @@
 package version
 
 import (
+	"runtime/debug"
 	"strings"
 	"testing"
 )
 
-func resetVersionState() {
-	Branch = ""
-	Revision = ""
-	GoVersion = "go1.24.0"
-	GoOS = "linux"
-	GoArch = "amd64"
-	computedRevision = ""
-	computedTags = ""
+func restoreVersionState(t *testing.T) {
+	t.Helper()
+
+	originalBranch := Branch
+	originalRevision := Revision
+	originalGoVersion := GoVersion
+	originalGoOS := GoOS
+	originalGoArch := GoArch
+	originalComputedRevision := computedRevision
+	originalComputedTags := computedTags
+
+	t.Cleanup(func() {
+		Branch = originalBranch
+		Revision = originalRevision
+		GoVersion = originalGoVersion
+		GoOS = originalGoOS
+		GoArch = originalGoArch
+		computedRevision = originalComputedRevision
+		computedTags = originalComputedTags
+	})
 }
 
 func TestInfo(t *testing.T) {
@@ -38,7 +51,7 @@ func TestInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(resetVersionState)
+			restoreVersionState(t)
 			Branch = tt.branch
 			Revision = tt.revision
 			computedRevision = "" // ensure empty revision case is truly empty
@@ -67,7 +80,10 @@ func TestBuildContext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(resetVersionState)
+			restoreVersionState(t)
+			GoVersion = "go1.24.0"
+			GoOS = "linux"
+			GoArch = "amd64"
 			computedTags = tt.tags
 			got := BuildContext()
 			want := "(go=go1.24.0, platform=linux/amd64, tags=" + tt.tags + ")"
@@ -101,7 +117,7 @@ func TestGetRevision(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(resetVersionState)
+			restoreVersionState(t)
 			Revision = tt.revision
 			computedRevision = tt.computed
 			got := GetRevision()
@@ -132,7 +148,7 @@ func TestGetTags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(resetVersionState)
+			restoreVersionState(t)
 			computedTags = tt.computed
 			got := GetTags()
 			if got != tt.want {
@@ -142,8 +158,67 @@ func TestGetTags(t *testing.T) {
 	}
 }
 
+func TestComputeRevisionFrom(t *testing.T) {
+	tests := []struct {
+		name         string
+		buildInfo    *debug.BuildInfo
+		ok           bool
+		wantRevision string
+		wantTags     string
+	}{
+		{
+			name:         "unavailable build info",
+			ok:           false,
+			wantRevision: "unknown",
+			wantTags:     "unknown",
+		},
+		{
+			name: "revision and tags",
+			buildInfo: &debug.BuildInfo{
+				Settings: []debug.BuildSetting{
+					{Key: "vcs.revision", Value: "abc123"},
+					{Key: "-tags", Value: "netgo,osusergo"},
+				},
+			},
+			ok:           true,
+			wantRevision: "abc123",
+			wantTags:     "netgo,osusergo",
+		},
+		{
+			name: "modified revision without tags",
+			buildInfo: &debug.BuildInfo{
+				Settings: []debug.BuildSetting{
+					{Key: "vcs.revision", Value: "def456"},
+					{Key: "vcs.modified", Value: "true"},
+				},
+			},
+			ok:           true,
+			wantRevision: "def456-modified",
+			wantTags:     "unknown",
+		},
+		{
+			name:         "nil build info reported available",
+			ok:           true,
+			wantRevision: "unknown",
+			wantTags:     "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotRevision, gotTags := computeRevisionFrom(tt.buildInfo, tt.ok)
+			if gotRevision != tt.wantRevision {
+				t.Errorf("computeRevisionFrom() revision = %q, want %q", gotRevision, tt.wantRevision)
+			}
+			if gotTags != tt.wantTags {
+				t.Errorf("computeRevisionFrom() tags = %q, want %q", gotTags, tt.wantTags)
+			}
+		})
+	}
+}
+
 func TestPrint(t *testing.T) {
-	t.Cleanup(resetVersionState)
+	restoreVersionState(t)
 	Branch = "develop"
 	Revision = "def456"
 	computedRevision = "computed-rev"
@@ -166,7 +241,7 @@ func TestPrint(t *testing.T) {
 }
 
 func TestSlog(t *testing.T) {
-	t.Cleanup(resetVersionState)
+	restoreVersionState(t)
 	Branch = "main"
 	Revision = "sha123"
 	GoVersion = "go1.24.0"

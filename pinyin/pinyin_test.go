@@ -16,9 +16,13 @@ func TestGetPinyinInitial(t *testing.T) {
 		// 边界情况
 		{"空字符串", "", ""},
 		{"纯空格", "   ", ""},
+		{"中文+制表符", "张\t三", "ZS"},
+		{"中文+换行符", "张\n三", "ZS"},
 		// Emoji
 		{"纯emoji", "🎉🔥", ""},
 		{"中文+emoji", "🎉张🔥三", "ZS"},
+		{"纯家庭ZWJ emoji", "👨‍👩‍👧‍👦", ""},
+		{"中文+家庭ZWJ emoji", "张👨‍👩‍👧‍👦三", "ZS"},
 		// 混合
 		{"空格+字母+emoji", " 张 a 三 🎉", "ZAS"},
 		{"标点符号", "张,三!", "ZS"},
@@ -130,11 +134,15 @@ func TestIsAllChinese(t *testing.T) {
 		// 边界情况
 		{"空字符串", "", false},
 		{"纯空格", "   ", false},
+		{"中文+制表符", "张\t三", false},
+		{"中文+换行符", "张\n三", false},
 		// 空格（被移除后判断）
 		{"中文+空格", "张 三", true},
 		// Emoji（被移除后判断）
 		{"中文+emoji", "🎉张三", true},
 		{"纯emoji", "🎉🔥", false},
+		{"纯家庭ZWJ emoji", "👨‍👩‍👧‍👦", false},
+		{"中文+家庭ZWJ emoji", "张👨‍👩‍👧‍👦三", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

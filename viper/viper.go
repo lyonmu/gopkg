@@ -19,32 +19,46 @@ var (
 
 // ConfigManager 是一个泛型配置管理器，支持类型安全的配置加载和动态监听。
 type ConfigManager[T any] struct {
-	mu      sync.RWMutex
-	cfg     *T
-	current T
+	loadMu      sync.Mutex
+	lifecycleMu sync.Mutex
+	mu          sync.RWMutex
+	cfg         *T
+	current     T
+	closed      bool
+	generation  uint64
+	session     *watchSession
+	watchCh     chan struct{}
+	errCh       chan error
+}
 
-	v       *viper.Viper
-	watcher *fsnotify.Watcher
-
+type watchSession struct {
+	v              *viper.Viper
+	watcher        *fsnotify.Watcher
 	configFile     string
 	realConfigFile string
+	doneCh         chan struct{}
+	exited         chan struct{}
+	closeOnce      sync.Once
+}
 
-	watchCh chan struct{}
-	errCh   chan error
-	doneCh  chan struct{}
+func (session *watchSession) closeWithoutWait() {
+	session.closeOnce.Do(func() {
+		close(session.doneCh)
+		_ = session.watcher.Close()
+	})
+}
 
-	closeOnce sync.Once
-	closed    bool
+func (session *watchSession) closeAndWait() {
+	session.closeWithoutWait()
+	<-session.exited
 }
 
 // NewConfigManager 创建一个新的泛型配置管理器。
 func NewConfigManager[T any](cfg *T) *ConfigManager[T] {
 	return &ConfigManager[T]{
 		cfg:     cfg,
-		v:       viper.New(),
 		watchCh: make(chan struct{}, defaultChannelSize),
 		errCh:   make(chan error, defaultChannelSize),
-		doneCh:  make(chan struct{}),
 	}
 }
 
@@ -53,24 +67,41 @@ func (cm *ConfigManager[T]) LoadConfig(path string, filetype string) error {
 	if cm.cfg == nil {
 		return ErrNilConfig
 	}
-	if cm.isClosed() {
+
+	cm.loadMu.Lock()
+	defer cm.loadMu.Unlock()
+
+	cm.lifecycleMu.Lock()
+	if cm.closed {
+		cm.lifecycleMu.Unlock()
 		return ErrAlreadyClosed
 	}
+	generation := cm.generation
+	currentSession := cm.session
+	cm.lifecycleMu.Unlock()
 
-	cm.v.SetConfigFile(path)
-	if filetype != "" {
-		cm.v.SetConfigType(filetype)
-	}
-
-	cfg, err := cm.readConfig()
+	session, cfg, err := cm.newSession(path, filetype)
 	if err != nil {
 		return err
 	}
-	if err := cm.startWatcher(path); err != nil {
-		return err
+
+	cm.lifecycleMu.Lock()
+	if cm.closed || cm.generation != generation || cm.session != currentSession {
+		cm.lifecycleMu.Unlock()
+		session.closeWithoutWait()
+		return ErrAlreadyClosed
 	}
 
+	oldSession := currentSession
+	cm.session = session
+	cm.generation++
 	cm.updateConfig(cfg)
+	go cm.watchLoop(session)
+	cm.lifecycleMu.Unlock()
+
+	if oldSession != nil {
+		oldSession.closeAndWait()
+	}
 
 	return nil
 }
@@ -95,30 +126,21 @@ func (cm *ConfigManager[T]) Errors() <-chan error {
 
 // Close 停止监听配置变化。重复调用是安全的。
 func (cm *ConfigManager[T]) Close() {
-	cm.closeOnce.Do(func() {
-		cm.mu.Lock()
-		cm.closed = true
-		watcher := cm.watcher
-		cm.mu.Unlock()
-
-		close(cm.doneCh)
-		if watcher != nil {
-			_ = watcher.Close()
-		}
-	})
-}
-
-func (cm *ConfigManager[T]) readConfig() (T, error) {
-	var cfg T
-
-	if err := cm.v.ReadInConfig(); err != nil {
-		return cfg, fmt.Errorf("read config: %w", err)
-	}
-	if err := cm.v.Unmarshal(&cfg); err != nil {
-		return cfg, fmt.Errorf("unmarshal config: %w", err)
+	cm.lifecycleMu.Lock()
+	if cm.closed {
+		cm.lifecycleMu.Unlock()
+		return
 	}
 
-	return cfg, nil
+	cm.closed = true
+	session := cm.session
+	cm.session = nil
+	cm.generation++
+	cm.lifecycleMu.Unlock()
+
+	if session != nil {
+		session.closeAndWait()
+	}
 }
 
 func (cm *ConfigManager[T]) updateConfig(cfg T) {
@@ -129,96 +151,114 @@ func (cm *ConfigManager[T]) updateConfig(cfg T) {
 	*cm.cfg = cfg
 }
 
-func (cm *ConfigManager[T]) startWatcher(path string) error {
+func (cm *ConfigManager[T]) newSession(path string, filetype string) (*watchSession, T, error) {
+	var cfg T
+
 	cleanConfigFile := filepath.Clean(path)
 	configDir := filepath.Dir(cleanConfigFile)
 	realConfigFile, _ := filepath.EvalSymlinks(cleanConfigFile)
 
+	v := viper.New()
+	v.SetConfigFile(cleanConfigFile)
+	if filetype != "" {
+		v.SetConfigType(filetype)
+	}
+	if err := v.ReadInConfig(); err != nil {
+		return nil, cfg, fmt.Errorf("read config: %w", err)
+	}
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, cfg, fmt.Errorf("unmarshal config: %w", err)
+	}
+
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		return fmt.Errorf("create config watcher: %w", err)
+		return nil, cfg, fmt.Errorf("create config watcher: %w", err)
 	}
 	if err := watcher.Add(configDir); err != nil {
 		_ = watcher.Close()
-		return fmt.Errorf("watch config directory: %w", err)
+		return nil, cfg, fmt.Errorf("watch config directory: %w", err)
 	}
 
-	cm.mu.Lock()
-	if cm.watcher != nil {
-		oldWatcher := cm.watcher
-		_ = oldWatcher.Close()
-	}
-	cm.watcher = watcher
-	cm.configFile = cleanConfigFile
-	cm.realConfigFile = realConfigFile
-	cm.mu.Unlock()
-
-	go cm.watchLoop(watcher)
-
-	return nil
+	return &watchSession{
+		v:              v,
+		watcher:        watcher,
+		configFile:     cleanConfigFile,
+		realConfigFile: realConfigFile,
+		doneCh:         make(chan struct{}),
+		exited:         make(chan struct{}),
+	}, cfg, nil
 }
 
-func (cm *ConfigManager[T]) watchLoop(watcher *fsnotify.Watcher) {
+func (cm *ConfigManager[T]) watchLoop(session *watchSession) {
+	defer close(session.exited)
+
 	for {
 		select {
-		case <-cm.doneCh:
+		case <-session.doneCh:
 			return
-		case event, ok := <-watcher.Events:
+		case event, ok := <-session.watcher.Events:
 			if !ok {
 				return
 			}
-			if cm.shouldReload(event) {
-				cm.reload()
+			if reload, realConfigFile := session.shouldReload(event); reload {
+				cm.reload(session, realConfigFile)
 			}
-		case err, ok := <-watcher.Errors:
+		case err, ok := <-session.watcher.Errors:
 			if !ok {
 				return
 			}
-			cm.notifyError(fmt.Errorf("watch config: %w", err))
+			cm.notifyError(session, fmt.Errorf("watch config: %w", err))
 		}
 	}
 }
 
-func (cm *ConfigManager[T]) shouldReload(event fsnotify.Event) bool {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+func (session *watchSession) shouldReload(event fsnotify.Event) (bool, string) {
+	currentConfigFile, _ := filepath.EvalSymlinks(session.configFile)
+	configChanged := filepath.Clean(event.Name) == session.configFile &&
+		(event.Has(fsnotify.Write) || event.Has(fsnotify.Create))
+	symlinkChanged := currentConfigFile != "" && currentConfigFile != session.realConfigFile
 
-	currentConfigFile, _ := filepath.EvalSymlinks(cm.configFile)
-	configChanged := filepath.Clean(event.Name) == cm.configFile &&
-		(event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename))
-	symlinkChanged := currentConfigFile != "" && currentConfigFile != cm.realConfigFile
-
-	if symlinkChanged {
-		cm.realConfigFile = currentConfigFile
-	}
-
-	return configChanged || symlinkChanged
+	return configChanged || symlinkChanged, currentConfigFile
 }
 
-func (cm *ConfigManager[T]) reload() {
-	cfg, err := cm.readConfig()
-	if err != nil {
-		cm.notifyError(fmt.Errorf("reload config: %w", err))
+func (cm *ConfigManager[T]) reload(session *watchSession, realConfigFile string) {
+	var cfg T
+
+	if err := session.v.ReadInConfig(); err != nil {
+		cm.notifyError(session, fmt.Errorf("reload config: read config: %w", err))
+		return
+	}
+	if err := session.v.Unmarshal(&cfg); err != nil {
+		cm.notifyError(session, fmt.Errorf("reload config: unmarshal config: %w", err))
 		return
 	}
 
+	cm.lifecycleMu.Lock()
+	defer cm.lifecycleMu.Unlock()
+
+	if cm.closed || cm.session != session {
+		return
+	}
+
+	if realConfigFile != "" {
+		session.realConfigFile = realConfigFile
+	}
 	cm.updateConfig(cfg)
 	cm.notifyWatch()
 }
 
 func (cm *ConfigManager[T]) notifyWatch() {
-	if cm.isClosed() {
-		return
-	}
-
 	select {
 	case cm.watchCh <- struct{}{}:
 	default:
 	}
 }
 
-func (cm *ConfigManager[T]) notifyError(err error) {
-	if cm.isClosed() {
+func (cm *ConfigManager[T]) notifyError(session *watchSession, err error) {
+	cm.lifecycleMu.Lock()
+	defer cm.lifecycleMu.Unlock()
+
+	if cm.closed || cm.session != session {
 		return
 	}
 
@@ -226,11 +266,4 @@ func (cm *ConfigManager[T]) notifyError(err error) {
 	case cm.errCh <- err:
 	default:
 	}
-}
-
-func (cm *ConfigManager[T]) isClosed() bool {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
-
-	return cm.closed
 }

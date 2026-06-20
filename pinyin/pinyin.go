@@ -7,14 +7,18 @@ import (
 	go_pinyin "github.com/mozillazg/go-pinyin"
 )
 
+var (
+	emojiRegexp      = regexp.MustCompile(`[\x{1F600}-\x{1F64F}\x{1F300}-\x{1F5FF}\x{1F680}-\x{1F6FF}\x{1F1E0}-\x{1F1FF}\x{2600}-\x{26FF}\x{2700}-\x{27BF}\x{FE00}-\x{FE0F}\x{1F900}-\x{1F9FF}\x{1FA00}-\x{1FA6F}\x{1FA70}-\x{1FAFF}\x{200D}\x{20E3}\x{00A9}\x{00AE}]`)
+	allChineseRegexp = regexp.MustCompile(`^\p{Han}+$`)
+)
+
 // cleanInput 清理输入字符串：移除空格和 emoji 字符
 // 返回仅保留中文、字母、数字和标点的有效字符串
 func cleanInput(s string) string {
 	// 移除所有空格
 	s = strings.ReplaceAll(s, " ", "")
 	// 移除 emoji（Unicode 范围：杂项符号、表情符号、补充符号等）
-	reg := regexp.MustCompile(`[\x{1F600}-\x{1F64F}\x{1F300}-\x{1F5FF}\x{1F680}-\x{1F6FF}\x{1F1E0}-\x{1F1FF}\x{2600}-\x{26FF}\x{2700}-\x{27BF}\x{FE00}-\x{FE0F}\x{1F900}-\x{1F9FF}\x{1FA00}-\x{1FA6F}\x{1FA70}-\x{1FAFF}\x{200D}\x{20E3}\x{00A9}\x{00AE}]`)
-	return reg.ReplaceAllString(s, "")
+	return emojiRegexp.ReplaceAllString(s, "")
 }
 
 // GetPinyinInitial 返回中文字符串的拼音首字母（大写）
@@ -132,6 +136,5 @@ func IsAllChinese(s string) bool {
 	if s == "" {
 		return false
 	}
-	reg := regexp.MustCompile(`^\p{Han}+$`)
-	return reg.MatchString(s)
+	return allChineseRegexp.MatchString(s)
 }
