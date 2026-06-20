@@ -154,6 +154,91 @@ func TestStructToMap(t *testing.T) {
 	}
 }
 
+func TestStructToMapPointerCycles(t *testing.T) {
+	type node struct {
+		Name string
+		Next *node
+	}
+
+	tests := []struct {
+		name  string
+		input func() *node
+		path  []string
+	}{
+		{
+			name: "self cycle",
+			input: func() *node {
+				root := &node{Name: "root"}
+				root.Next = root
+				return root
+			},
+			path: []string{"Next", "Next"},
+		},
+		{
+			name: "mutual cycle",
+			input: func() *node {
+				first := &node{Name: "first"}
+				second := &node{Name: "second"}
+				first.Next = second
+				second.Next = first
+				return first
+			},
+			path: []string{"Next", "Next", "Next"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := StructToMap(tt.input())
+			if err != nil {
+				t.Fatalf("StructToMap() error = %v", err)
+			}
+			if got == nil {
+				t.Fatal("StructToMap() returned nil map")
+			}
+
+			var current any = got
+			for _, field := range tt.path {
+				currentMap, ok := current.(map[string]any)
+				if !ok {
+					t.Fatalf("StructToMap() path %v reached %T, want map[string]any", tt.path, current)
+				}
+				current = currentMap[field]
+			}
+			if current != nil {
+				t.Fatalf("StructToMap() cycle value = %#v, want nil", current)
+			}
+		})
+	}
+}
+
+func TestStructToMapDepthLimitStable(t *testing.T) {
+	type node struct {
+		Value int
+		Next  *node
+	}
+
+	root := &node{}
+	current := root
+	for i := 1; i < maxDepth+3; i++ {
+		current.Next = &node{Value: i}
+		current = current.Next
+	}
+
+	first, err := StructToMap(root)
+	if err != nil {
+		t.Fatalf("first StructToMap() error = %v", err)
+	}
+	second, err := StructToMap(root)
+	if err != nil {
+		t.Fatalf("second StructToMap() error = %v", err)
+	}
+
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("StructToMap() results differ:\nfirst:  %#v\nsecond: %#v", first, second)
+	}
+}
+
 func TestDiffStruct(t *testing.T) {
 	type Inner struct {
 		X int

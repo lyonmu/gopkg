@@ -32,6 +32,8 @@ func DiffStruct(dst, src any) (map[string]any, []string, error) {
 
 	result := make(map[string]any)
 	fields := make([]string, 0)
+	dstState := &conversionState{visiting: make(map[visit]struct{})}
+	srcState := &conversionState{visiting: make(map[visit]struct{})}
 
 	for i := 0; i < dstType.NumField(); i++ {
 		dstField := dstVal.Field(i)
@@ -41,8 +43,8 @@ func DiffStruct(dst, src any) (map[string]any, []string, error) {
 			continue
 		}
 
-		dstConverted := fieldToMapValue(dstField, 0)
-		srcConverted := fieldToMapValue(srcField, 0)
+		dstConverted := fieldToMapValue(dstField, 0, dstState)
+		srcConverted := fieldToMapValue(srcField, 0, srcState)
 
 		if !reflect.DeepEqual(dstConverted, srcConverted) {
 			result[dstType.Field(i).Name] = dstConverted
@@ -116,6 +118,15 @@ func Assign(dst, src any) error {
 
 const maxDepth = 10
 
+type visit struct {
+	typ reflect.Type
+	ptr uintptr
+}
+
+type conversionState struct {
+	visiting map[visit]struct{}
+}
+
 // dereference 安全解引用指针。如果是指针且为 nil，返回零值 + true。
 func dereference(v reflect.Value) (reflect.Value, bool) {
 	if !v.IsValid() {
@@ -153,9 +164,20 @@ func hasExportedField(t reflect.Type) bool {
 }
 
 // fieldToMapValue 将单个字段值转为 map 可存储格式，递归处理复杂类型。
-func fieldToMapValue(v reflect.Value, depth int) interface{} {
+func fieldToMapValue(v reflect.Value, depth int, state *conversionState) interface{} {
 	if depth > maxDepth {
 		return nil
+	}
+	if !v.IsValid() {
+		return nil
+	}
+	if v.Kind() == reflect.Ptr && !v.IsNil() {
+		current := visit{typ: v.Type(), ptr: v.Pointer()}
+		if _, ok := state.visiting[current]; ok {
+			return nil
+		}
+		state.visiting[current] = struct{}{}
+		defer delete(state.visiting, current)
 	}
 
 	derefV, isNil := dereference(v)
@@ -166,12 +188,12 @@ func fieldToMapValue(v reflect.Value, depth int) interface{} {
 	switch derefV.Kind() {
 	case reflect.Struct:
 		if derefV.NumField() == 0 {
-			return structToMapValue(derefV, depth+1)
+			return structToMapValue(derefV, depth+1, state)
 		}
 		if !hasExportedField(derefV.Type()) {
 			return safeInterface(derefV)
 		}
-		return structToMapValue(derefV, depth+1)
+		return structToMapValue(derefV, depth+1, state)
 	case reflect.Slice:
 		if derefV.IsNil() {
 			return nil
@@ -179,14 +201,14 @@ func fieldToMapValue(v reflect.Value, depth int) interface{} {
 		result := make([]any, derefV.Len())
 		for i := 0; i < derefV.Len(); i++ {
 			elem := derefV.Index(i)
-			result[i] = fieldToMapValue(elem, depth+1)
+			result[i] = fieldToMapValue(elem, depth+1, state)
 		}
 		return result
 	case reflect.Array:
 		result := make([]any, derefV.Len())
 		for i := 0; i < derefV.Len(); i++ {
 			elem := derefV.Index(i)
-			result[i] = fieldToMapValue(elem, depth+1)
+			result[i] = fieldToMapValue(elem, depth+1, state)
 		}
 		return result
 	case reflect.Map:
@@ -197,7 +219,7 @@ func fieldToMapValue(v reflect.Value, depth int) interface{} {
 		for _, key := range derefV.MapKeys() {
 			val := derefV.MapIndex(key)
 			keyStr := fmt.Sprintf("%v", key.Interface())
-			result[keyStr] = fieldToMapValue(val, depth+1)
+			result[keyStr] = fieldToMapValue(val, depth+1, state)
 		}
 		return result
 	default:
@@ -206,7 +228,7 @@ func fieldToMapValue(v reflect.Value, depth int) interface{} {
 }
 
 // structToMapValue 核心递归：将 struct 转为 map[string]any。
-func structToMapValue(sv reflect.Value, depth int) map[string]any {
+func structToMapValue(sv reflect.Value, depth int, state *conversionState) map[string]any {
 	result := make(map[string]any)
 	st := sv.Type()
 
@@ -218,7 +240,7 @@ func structToMapValue(sv reflect.Value, depth int) map[string]any {
 			continue
 		}
 
-		result[fieldType.Name] = fieldToMapValue(fieldValue, depth)
+		result[fieldType.Name] = fieldToMapValue(fieldValue, depth, state)
 	}
 
 	return result
@@ -254,5 +276,7 @@ func StructToMap(v any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return structToMapValue(val, 0), nil
+	return structToMapValue(val, 0, &conversionState{
+		visiting: make(map[visit]struct{}),
+	}), nil
 }
