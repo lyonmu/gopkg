@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 type testConfig struct {
@@ -22,6 +24,27 @@ func writeConfig(t *testing.T, path string, body string) {
 
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
+	}
+}
+
+func atomicReplaceConfig(t *testing.T, path string, body string) {
+	t.Helper()
+
+	replacement := path + ".replacement"
+	writeConfig(t, replacement, body)
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatalf("replace config: %v", err)
+	}
+}
+
+func replaceSymlink(t *testing.T, linkPath string, targetPath string) {
+	t.Helper()
+
+	if err := os.Remove(linkPath); err != nil {
+		t.Fatalf("remove config symlink: %v", err)
+	}
+	if err := os.Symlink(filepath.Base(targetPath), linkPath); err != nil {
+		t.Fatalf("replace config symlink: %v", err)
 	}
 }
 
@@ -74,6 +97,26 @@ func waitForConfig(t *testing.T, cm *ConfigManager[testConfig], want testConfig)
 		case err := <-cm.Errors():
 			t.Fatalf("unexpected reload error: %v", err)
 		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatalf("GetConfig() = %#v, want %#v", cm.GetConfig(), want)
+		}
+	}
+}
+
+func waitForReloadConfig(t *testing.T, cm *ConfigManager[testConfig], want testConfig) {
+	t.Helper()
+
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+
+	for {
+		select {
+		case <-cm.Watch():
+			if got := cm.GetConfig(); got == want {
+				return
+			}
+		case err := <-cm.Errors():
+			t.Fatalf("unexpected reload error: %v", err)
 		case <-deadline.C:
 			t.Fatalf("GetConfig() = %#v, want %#v", cm.GetConfig(), want)
 		}
@@ -257,7 +300,11 @@ func TestConfigManagerSequentialLoadConfigOnlyReloadsCurrentFile(t *testing.T) {
 			}
 
 			writeConfig(t, firstPath, "name: stale\nport: 1002\n")
-			cm.reload(firstSession)
+			select {
+			case <-firstSession.exited:
+			default:
+				t.Fatal("LoadConfig(second) returned before the old watcher exited")
+			}
 			if got := cm.GetConfig(); got != (testConfig{Name: "second", Port: 2001}) {
 				t.Fatalf("stale session changed config to %#v", got)
 			}
@@ -274,6 +321,164 @@ func TestConfigManagerSequentialLoadConfigOnlyReloadsCurrentFile(t *testing.T) {
 
 			if cfg != (testConfig{Name: "current", Port: 2002}) {
 				t.Fatalf("provided pointer = %#v, want current config", cfg)
+			}
+		})
+	}
+}
+
+func TestConfigManagerSymlinkTargetRecovery(t *testing.T) {
+	tests := []struct {
+		name          string
+		prepareTarget func(t *testing.T, path string)
+		fixTarget     func(t *testing.T, path string)
+	}{
+		{
+			name: "invalid target",
+			prepareTarget: func(t *testing.T, path string) {
+				writeConfig(t, path, "name: [broken\n")
+			},
+			fixTarget: func(t *testing.T, path string) {
+				writeConfig(t, path, "name: recovered\nport: 9090\n")
+			},
+		},
+		{
+			name:          "missing target",
+			prepareTarget: func(t *testing.T, path string) {},
+			fixTarget: func(t *testing.T, path string) {
+				writeConfig(t, path, "name: recovered\nport: 9090\n")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			initialPath := filepath.Join(dir, "initial.yaml")
+			nextPath := filepath.Join(dir, "next.yaml")
+			linkPath := filepath.Join(dir, "config.yaml")
+			writeConfig(t, initialPath, "name: initial\nport: 8080\n")
+			tt.prepareTarget(t, nextPath)
+			if err := os.Symlink(filepath.Base(initialPath), linkPath); err != nil {
+				t.Fatalf("create config symlink: %v", err)
+			}
+
+			cfg := testConfig{}
+			cm := NewConfigManager(&cfg)
+			defer cm.Close()
+			if err := cm.LoadConfig(linkPath, "yaml"); err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+			session := cm.session
+			initialRealConfigFile := session.realConfigFile
+
+			replaceSymlink(t, linkPath, nextPath)
+			writeConfig(t, nextPath, "name: [broken\n")
+			err := waitForError(t, cm)
+			if !strings.Contains(err.Error(), "reload config") {
+				t.Fatalf("reload error = %v, want reload context", err)
+			}
+			if got := cm.GetConfig(); got != (testConfig{Name: "initial", Port: 8080}) {
+				t.Fatalf("GetConfig() = %#v, want initial config", got)
+			}
+			if session.realConfigFile != initialRealConfigFile {
+				t.Fatalf(
+					"failed reload committed real config file %q, want %q",
+					session.realConfigFile,
+					initialRealConfigFile,
+				)
+			}
+
+			tt.fixTarget(t, nextPath)
+			waitForReloadConfig(t, cm, testConfig{Name: "recovered", Port: 9090})
+			realNextPath, err := filepath.EvalSymlinks(nextPath)
+			if err != nil {
+				t.Fatalf("evaluate recovered target: %v", err)
+			}
+			if session.realConfigFile != realNextPath {
+				t.Fatalf("real config file = %q, want %q", session.realConfigFile, realNextPath)
+			}
+		})
+	}
+}
+
+func TestConfigManagerAtomicReplacementDoesNotEmitStaleError(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want testConfig
+	}{
+		{
+			name: "rename then create",
+			body: "name: replaced\nport: 9090\ndebug: true\n",
+			want: testConfig{Name: "replaced", Port: 9090, Debug: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			writeConfig(t, path, "name: initial\nport: 8080\n")
+
+			cfg := testConfig{}
+			cm := NewConfigManager(&cfg)
+			defer cm.Close()
+			if err := cm.LoadConfig(path, "yaml"); err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+
+			atomicReplaceConfig(t, path, tt.body)
+			waitForReload(t, cm)
+			if got := cm.GetConfig(); got != tt.want {
+				t.Fatalf("GetConfig() = %#v, want %#v", got, tt.want)
+			}
+			select {
+			case err := <-cm.Errors():
+				t.Fatalf("atomic replacement emitted stale error: %v", err)
+			default:
+			}
+		})
+	}
+}
+
+func TestWatchSessionShouldReload(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	writeConfig(t, configFile, "name: app\n")
+	realConfigFile, err := filepath.EvalSymlinks(configFile)
+	if err != nil {
+		t.Fatalf("evaluate config path: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		event fsnotify.Event
+		want  bool
+	}{
+		{
+			name:  "write reloads",
+			event: fsnotify.Event{Name: configFile, Op: fsnotify.Write},
+			want:  true,
+		},
+		{
+			name:  "create reloads",
+			event: fsnotify.Event{Name: configFile, Op: fsnotify.Create},
+			want:  true,
+		},
+		{
+			name:  "rename alone waits for replacement",
+			event: fsnotify.Event{Name: configFile, Op: fsnotify.Rename},
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := &watchSession{
+				configFile:     configFile,
+				realConfigFile: realConfigFile,
+			}
+			got, _ := session.shouldReload(tt.event)
+			if got != tt.want {
+				t.Fatalf("shouldReload() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -427,6 +632,78 @@ func TestConfigManagerLoadConfigAndCloseRepeated(t *testing.T) {
 						t.Fatalf("iteration %d attempt %d: LoadConfig() error = %v, want ErrAlreadyClosed", i, attempt, err)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestConfigManagerCloseDoesNotWaitForLoad(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "load serialization is independent"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			writeConfig(t, path, "name: app\n")
+
+			cfg := testConfig{}
+			cm := NewConfigManager(&cfg)
+			cm.loadMu.Lock()
+
+			loadErr := make(chan error, 1)
+			go func() {
+				loadErr <- cm.LoadConfig(path, "yaml")
+			}()
+
+			closed := make(chan struct{})
+			go func() {
+				cm.Close()
+				close(closed)
+			}()
+
+			select {
+			case <-closed:
+			case <-time.After(3 * time.Second):
+				cm.loadMu.Unlock()
+				t.Fatal("Close blocked behind LoadConfig serialization")
+			}
+
+			cm.loadMu.Unlock()
+			if err := <-loadErr; !errors.Is(err, ErrAlreadyClosed) {
+				t.Fatalf("LoadConfig() error = %v, want ErrAlreadyClosed", err)
+			}
+		})
+	}
+}
+
+func TestConfigManagerCloseWaitsForWatcherExit(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "current watcher exits before close returns"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			writeConfig(t, path, "name: app\n")
+
+			cfg := testConfig{}
+			cm := NewConfigManager(&cfg)
+			if err := cm.LoadConfig(path, "yaml"); err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+			session := cm.session
+
+			cm.Close()
+
+			select {
+			case <-session.exited:
+			default:
+				t.Fatal("Close returned before watcher exited")
 			}
 		})
 	}
