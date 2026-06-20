@@ -212,30 +212,44 @@ func TestStructToMapPointerCycles(t *testing.T) {
 	}
 }
 
-func TestStructToMapDepthLimitStable(t *testing.T) {
+func TestStructToMapDepthLimitIsStable(t *testing.T) {
 	type node struct {
 		Value int
 		Next  *node
 	}
 
-	root := &node{}
-	current := root
-	for i := 1; i < maxDepth+3; i++ {
-		current.Next = &node{Value: i}
-		current = current.Next
+	tests := []struct {
+		name  string
+		depth int
+	}{
+		{
+			name:  "exceeds max depth",
+			depth: maxDepth + 3,
+		},
 	}
 
-	first, err := StructToMap(root)
-	if err != nil {
-		t.Fatalf("first StructToMap() error = %v", err)
-	}
-	second, err := StructToMap(root)
-	if err != nil {
-		t.Fatalf("second StructToMap() error = %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := &node{}
+			current := root
+			for i := 1; i < tt.depth; i++ {
+				current.Next = &node{Value: i}
+				current = current.Next
+			}
 
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("StructToMap() results differ:\nfirst:  %#v\nsecond: %#v", first, second)
+			first, err := StructToMap(root)
+			if err != nil {
+				t.Fatalf("first StructToMap() error = %v", err)
+			}
+			second, err := StructToMap(root)
+			if err != nil {
+				t.Fatalf("second StructToMap() error = %v", err)
+			}
+
+			if !reflect.DeepEqual(first, second) {
+				t.Fatalf("StructToMap() results differ:\nfirst:  %#v\nsecond: %#v", first, second)
+			}
+		})
 	}
 }
 
