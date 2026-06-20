@@ -142,6 +142,16 @@ func safeInterface(v reflect.Value) interface{} {
 	return derefV.Interface()
 }
 
+// hasExportedField 判断 struct 类型是否包含导出字段。
+func hasExportedField(t reflect.Type) bool {
+	for i := 0; i < t.NumField(); i++ {
+		if t.Field(i).PkgPath == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // fieldToMapValue 将单个字段值转为 map 可存储格式，递归处理复杂类型。
 func fieldToMapValue(v reflect.Value, depth int) interface{} {
 	if depth > maxDepth {
@@ -155,11 +165,21 @@ func fieldToMapValue(v reflect.Value, depth int) interface{} {
 
 	switch derefV.Kind() {
 	case reflect.Struct:
+		if !hasExportedField(derefV.Type()) {
+			return safeInterface(derefV)
+		}
 		return structToMapValue(derefV, depth+1)
-	case reflect.Slice, reflect.Array:
+	case reflect.Slice:
 		if derefV.IsNil() {
 			return nil
 		}
+		result := make([]any, derefV.Len())
+		for i := 0; i < derefV.Len(); i++ {
+			elem := derefV.Index(i)
+			result[i] = fieldToMapValue(elem, depth+1)
+		}
+		return result
+	case reflect.Array:
 		result := make([]any, derefV.Len())
 		for i := 0; i < derefV.Len(); i++ {
 			elem := derefV.Index(i)

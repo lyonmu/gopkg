@@ -3,6 +3,7 @@ package structx
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestStructToMap(t *testing.T) {
@@ -66,6 +67,18 @@ func TestStructToMap(t *testing.T) {
 			name:    "slice 字段",
 			input:   struct{ S []int }{S: []int{1, 2, 3}},
 			want:    map[string]any{"S": []any{1, 2, 3}},
+			wantErr: false,
+		},
+		{
+			name:    "非空 array 字段",
+			input:   struct{ A [3]int }{A: [3]int{1, 2, 3}},
+			want:    map[string]any{"A": []any{1, 2, 3}},
+			wantErr: false,
+		},
+		{
+			name:    "空 array 字段",
+			input:   struct{ A [0]int }{},
+			want:    map[string]any{"A": []any{}},
 			wantErr: false,
 		},
 		{
@@ -141,14 +154,17 @@ func TestDiffStruct(t *testing.T) {
 		Y string
 	}
 	type Outer struct {
-		Name  string
-		Age   int
-		Inner Inner
-		Ptr   *string
+		Name      string
+		Age       int
+		Inner     Inner
+		Ptr       *string
+		CreatedAt time.Time
 	}
 
 	str1 := "hello"
 	str2 := "world"
+	createdAt := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
 
 	tests := []struct {
 		name       string
@@ -160,9 +176,17 @@ func TestDiffStruct(t *testing.T) {
 	}{
 		{
 			name:       "完全相同",
-			dst:        Outer{Name: "test", Age: 10},
-			src:        Outer{Name: "test", Age: 10},
+			dst:        Outer{Name: "test", Age: 10, CreatedAt: createdAt},
+			src:        Outer{Name: "test", Age: 10, CreatedAt: createdAt},
 			wantFields: []string{},
+			wantErr:    false,
+		},
+		{
+			name:       "time.Time 字段不同",
+			dst:        Outer{CreatedAt: createdAt},
+			src:        Outer{CreatedAt: updatedAt},
+			wantFields: []string{"CreatedAt"},
+			wantValues: map[string]any{"CreatedAt": createdAt},
 			wantErr:    false,
 		},
 		{
