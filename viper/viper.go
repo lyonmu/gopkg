@@ -189,6 +189,10 @@ func (cm *ConfigManager[T]) newSession(path string, filetype string) (*watchSess
 	}, cfg, nil
 }
 
+// watchLoop 监听配置文件目录的文件系统事件。
+// 事件过滤逻辑（Write/Create 触发重载，Remove 退出）和 symlink 变化检测
+// 与 viper 原生 WatchConfig 一致，但增加了错误通知、生命周期感知和
+// 世代校验（防止已关闭的 session 继续操作）。
 func (cm *ConfigManager[T]) watchLoop(session *watchSession) {
 	defer close(session.exited)
 
@@ -212,6 +216,11 @@ func (cm *ConfigManager[T]) watchLoop(session *watchSession) {
 	}
 }
 
+// shouldReload 判断文件系统事件是否应触发配置重载。
+// 判断逻辑与 viper 原生 WatchConfig 的 shouldReload 相同：
+//   - 配置文件的 Write 或 Create 事件触发重载
+//   - 配置文件的 symlink 目标变化触发重载（如 Kubernetes ConfigMap 替换）
+//   - Rename 事件不触发重载，等待后续 Create 事件
 func (session *watchSession) shouldReload(event fsnotify.Event) (bool, string) {
 	currentConfigFile, _ := filepath.EvalSymlinks(session.configFile)
 	configChanged := filepath.Clean(event.Name) == session.configFile &&

@@ -36,14 +36,27 @@ struct 操作工具包，提供 struct 转 map、差异比较、属性赋值等�
 | `{Name:"a", Age:10}` | `{Name:"a", Age:20}` | `map{"Age":10}, ["Age"]` |
 | `{Name:"a"}` | `{Name:"a"}` | `map{}, []` |
 
-### `Assign(dst, src any) error`
+### `AssignNonZero(dst, src any) error`
 
-将 src 中非零值的字段赋值给 dst。dst 必须是指针。
+将 src 中非零值字段赋值给 dst。dst 必须是指针。零值字段（如 `0`、`""`、`false`、`nil`）不会被赋值。
 
 | dst | src | 结果 |
 |-----|-----|------|
 | `&{Name:"old"}` | `{Name:"new", Age:5}` | `&{Name:"new", Age:5}` |
 | `&{Name:"keep"}` | `{}` | `&{Name:"keep"}`（不变） |
+
+### `AssignOverwrite(dst, src any) error`
+
+将 src 中所有字段赋值给 dst，包括零值字段。dst 必须是指针。
+
+| dst | src | 结果 |
+|-----|-----|------|
+| `&{Name:"old", Age:10}` | `{Name:"new"}` | `&{Name:"new", Age:0}` |
+| `&{Active:true}` | `{Active:false}` | `&{Active:false}` |
+
+### `Assign(dst, src any) error`
+
+已弃用：使用 `AssignNonZero` 获取明确语义。行为与 `AssignNonZero` 完全一致。
 
 ## 使用示例
 
@@ -74,10 +87,10 @@ func main() {
     fmt.Println(diff)   // map[Age:30]
     fmt.Println(fields) // [Age]
 
-    // Assign
+    // AssignNonZero
     dst := &User{Name: "old"}
     src := User{Name: "new", Age: 25}
-    structx.Assign(dst, src)
+    structx.AssignNonZero(dst, src)
     fmt.Println(dst) // &{new 25}
 }
 ```
