@@ -25,10 +25,6 @@ func NewSonySnowFlake(machineId func() (int, error)) (IDGenerator, error) {
 		// 起始时间留空，使用 Sonyflake 固定默认值 2025-01-01 00:00:00 +0000 UTC
 		// 生成当前实例机器 ID 的函数；若返回错误，实例创建失败；留空则默认使用私有 IP 的低 16 位
 		MachineID: machineId,
-		// 校验机器 ID 唯一性的函数；返回 false 则实例不会创建；留空则不做校验
-		CheckMachineID: func(id int) bool {
-			return id != 0
-		},
 	}
 	node, err := sonyflakeV2.New(settings)
 	if err != nil {

@@ -38,9 +38,9 @@ func TestNewSonySnowFlake(t *testing.T) {
 			wantErr:   true,
 		},
 		{
-			name:      "错误-machineId返回0被CheckMachineID拒绝",
+			name:      "正常-机器ID为0",
 			machineId: func() (int, error) { return 0, nil },
-			wantErr:   true,
+			wantErr:   false,
 		},
 	}
 	for _, tt := range tests {
