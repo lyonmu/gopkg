@@ -55,9 +55,9 @@ func DiffStruct(dst, src any) (map[string]any, []string, error) {
 	return result, fields, nil
 }
 
-// Assign 将 src 中非零值的字段赋值给 dst。dst 必须是指针。
-// 嵌套 struct 整体替换，不做字段级合并。
-func Assign(dst, src any) error {
+// assignFields 将 src 中字段赋值给 dst。skipZero 为 true 时跳过零值字段。
+// dst 必须是指针。嵌套 struct 整体替换，不做字段级合并。
+func assignFields(dst, src any, skipZero bool) error {
 	dstT := reflect.TypeOf(dst)
 	dstV := reflect.ValueOf(dst)
 
@@ -106,7 +106,7 @@ func Assign(dst, src any) error {
 			continue
 		}
 
-		if srcField.IsZero() {
+		if skipZero && srcField.IsZero() {
 			continue
 		}
 
@@ -114,6 +114,24 @@ func Assign(dst, src any) error {
 	}
 
 	return nil
+}
+
+// AssignNonZero 将 src 中非零值字段赋值给 dst。dst 必须是指针。
+// 嵌套 struct 整体替换，不做字段级合并。
+// 零值字段（如 0、""、false、nil）不会被赋值，dst 中对应字段保持原值。
+func AssignNonZero(dst, src any) error {
+	return assignFields(dst, src, true)
+}
+
+// AssignOverwrite 将 src 中所有字段赋值给 dst，包括零值字段。dst 必须是指针。
+// 嵌套 struct 整体替换，不做字段级合并。
+func AssignOverwrite(dst, src any) error {
+	return assignFields(dst, src, false)
+}
+
+// Deprecated: 使用 AssignNonZero 获取明确语义。
+func Assign(dst, src any) error {
+	return AssignNonZero(dst, src)
 }
 
 const maxDepth = 10

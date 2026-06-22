@@ -496,6 +496,123 @@ func TestDiffStruct(t *testing.T) {
 	}
 }
 
+func TestAssignOverwrite(t *testing.T) {
+	type Inner struct {
+		X int
+		Y string
+	}
+	type Outer struct {
+		Name   string
+		Age    int
+		Active bool
+		Inner  Inner
+		Ptr    *string
+	}
+
+	tests := []struct {
+		name    string
+		dst     any
+		src     any
+		want    Outer
+		wantErr bool
+	}{
+		{
+			name:    "零值字段覆盖有值字段",
+			dst:     &Outer{Name: "old", Age: 99, Active: true},
+			src:     Outer{},
+			want:    Outer{Name: "", Age: 0, Active: false},
+			wantErr: false,
+		},
+		{
+			name:    "部分零值部分非零",
+			dst:     &Outer{Name: "keep", Age: 10},
+			src:     Outer{Name: "", Age: 20},
+			want:    Outer{Name: "", Age: 20},
+			wantErr: false,
+		},
+		{
+			name:    "所有字段覆盖",
+			dst:     &Outer{Name: "old", Age: 10, Active: true},
+			src:     Outer{Name: "new", Age: 20, Active: false},
+			want:    Outer{Name: "new", Age: 20, Active: false},
+			wantErr: false,
+		},
+		{
+			name:    "嵌套 struct 整体替换为零值",
+			dst:     &Outer{Inner: Inner{X: 42, Y: "nested"}},
+			src:     Outer{Inner: Inner{}},
+			want:    Outer{Inner: Inner{X: 0, Y: ""}},
+			wantErr: false,
+		},
+		{
+			name: "指针字段赋值",
+			dst:  &Outer{},
+			src: func() Outer {
+				s := "hello"
+				return Outer{Ptr: &s}
+			}(),
+			want: func() Outer {
+				s := "hello"
+				return Outer{Ptr: &s}
+			}(),
+			wantErr: false,
+		},
+		{
+			name:    "非指针 dst",
+			dst:     Outer{},
+			src:     Outer{Name: "new"},
+			wantErr: true,
+		},
+		{
+			name:    "不同类型",
+			dst:     &Outer{},
+			src:     Inner{X: 1},
+			wantErr: true,
+		},
+		{
+			name:    "nil dst",
+			dst:     (*Outer)(nil),
+			src:     Outer{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := AssignOverwrite(tt.dst, tt.src)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("AssignOverwrite() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			got := tt.dst.(*Outer)
+			if got.Name != tt.want.Name {
+				t.Errorf("Name = %q, want %q", got.Name, tt.want.Name)
+			}
+			if got.Age != tt.want.Age {
+				t.Errorf("Age = %d, want %d", got.Age, tt.want.Age)
+			}
+			if got.Active != tt.want.Active {
+				t.Errorf("Active = %v, want %v", got.Active, tt.want.Active)
+			}
+			if got.Inner.X != tt.want.Inner.X {
+				t.Errorf("Inner.X = %d, want %d", got.Inner.X, tt.want.Inner.X)
+			}
+			if got.Inner.Y != tt.want.Inner.Y {
+				t.Errorf("Inner.Y = %q, want %q", got.Inner.Y, tt.want.Inner.Y)
+			}
+			if (got.Ptr == nil) != (tt.want.Ptr == nil) {
+				t.Errorf("Ptr nil mismatch: got %v, want %v", got.Ptr == nil, tt.want.Ptr == nil)
+			}
+			if got.Ptr != nil && tt.want.Ptr != nil && *got.Ptr != *tt.want.Ptr {
+				t.Errorf("Ptr = %q, want %q", *got.Ptr, *tt.want.Ptr)
+			}
+		})
+	}
+}
+
 func TestDiffStructCyclicValues(t *testing.T) {
 	type node struct {
 		Name string
