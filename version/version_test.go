@@ -10,7 +10,7 @@ func restoreVersionState(t *testing.T) {
 	t.Helper()
 
 	originalBranch := Branch
-	originalRevision := Revision
+	originalCommit := Commit
 	originalGoVersion := GoVersion
 	originalGoOS := GoOS
 	originalGoArch := GoArch
@@ -19,7 +19,7 @@ func restoreVersionState(t *testing.T) {
 
 	t.Cleanup(func() {
 		Branch = originalBranch
-		Revision = originalRevision
+		Commit = originalCommit
 		GoVersion = originalGoVersion
 		GoOS = originalGoOS
 		GoArch = originalGoArch
@@ -32,20 +32,20 @@ func TestInfo(t *testing.T) {
 	tests := []struct {
 		name     string
 		branch   string
-		revision string
+		commit string
 		want     string
 	}{
 		{
 			name:     "empty values",
 			branch:   "",
-			revision: "",
-			want:     "(branch=, revision=)",
+			commit: "",
+			want:     "(branch=, commit=)",
 		},
 		{
 			name:     "with values",
 			branch:   "main",
-			revision: "abc123",
-			want:     "(branch=main, revision=abc123)",
+			commit: "abc123",
+			want:     "(branch=main, commit=abc123)",
 		},
 	}
 
@@ -53,7 +53,7 @@ func TestInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			restoreVersionState(t)
 			Branch = tt.branch
-			Revision = tt.revision
+			Commit = tt.commit
 			computedRevision = "" // ensure empty revision case is truly empty
 			got := Info()
 			if got != tt.want {
@@ -97,19 +97,19 @@ func TestBuildContext(t *testing.T) {
 func TestGetRevision(t *testing.T) {
 	tests := []struct {
 		name     string
-		revision string
+		commit string
 		computed string
 		want     string
 	}{
 		{
-			name:     "Revision set",
-			revision: "v1.0.0",
+			name:     "Commit set",
+			commit: "v1.0.0",
 			computed: "abc123",
 			want:     "v1.0.0",
 		},
 		{
-			name:     "Revision empty, use computed",
-			revision: "",
+			name:     "Commit empty, use computed",
+			commit: "",
 			computed: "abc123",
 			want:     "abc123",
 		},
@@ -118,11 +118,11 @@ func TestGetRevision(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			restoreVersionState(t)
-			Revision = tt.revision
+			Commit = tt.commit
 			computedRevision = tt.computed
-			got := GetRevision()
+			got := GetCommit()
 			if got != tt.want {
-				t.Errorf("GetRevision() = %q, want %q", got, tt.want)
+				t.Errorf("GetCommit() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -220,7 +220,7 @@ func TestComputeRevisionFrom(t *testing.T) {
 func TestPrint(t *testing.T) {
 	restoreVersionState(t)
 	Branch = "develop"
-	Revision = "def456"
+	Commit = "def456"
 	computedRevision = "computed-rev"
 
 	got := Print("myapp")
@@ -229,7 +229,7 @@ func TestPrint(t *testing.T) {
 	for _, want := range []string{
 		"myapp",
 		"develop",
-		"def456", // Revision 非空，GetRevision 返回 Revision
+		"def456", // Commit 非空，GetCommit 返回 Commit
 		"go version:",
 		"platform:",
 		"tags:",
@@ -243,7 +243,7 @@ func TestPrint(t *testing.T) {
 func TestSlog(t *testing.T) {
 	restoreVersionState(t)
 	Branch = "main"
-	Revision = "sha123"
+	Commit = "sha123"
 	GoVersion = "go1.24.0"
 	GoOS = "linux"
 	GoArch = "amd64"

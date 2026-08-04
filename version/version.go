@@ -11,7 +11,8 @@ import (
 
 // Build information. Populated at build-time.
 var (
-	Revision  string
+	Version   string
+	Commit    string
 	Branch    string
 	GoVersion = runtime.Version()
 	GoOS      = runtime.GOOS
@@ -22,7 +23,8 @@ var (
 )
 
 // printTmpl is the pre-compiled template used by Print.
-var printTmpl = template.Must(template.New("version").Parse(`{{.program}}, (branch: {{.branch}}, revision: {{.revision}})
+var printTmpl = template.Must(template.New("version").Parse(`{{.program}}, (branch: {{.branch}}, commit: {{.commit}})
+program version:	{{.version}}
 go version:	{{.goVersion}}
 platform:	{{.platform}}
 tags:	{{.tags}}
@@ -32,7 +34,8 @@ tags:	{{.tags}}
 func Print(program string) string {
 	m := map[string]string{
 		"program":   program,
-		"revision":  GetRevision(),
+		"version":   Version,
+		"commit":    Commit,
 		"branch":    Branch,
 		"goVersion": GoVersion,
 		"platform":  GoOS + "/" + GoArch,
@@ -46,9 +49,9 @@ func Print(program string) string {
 	return strings.TrimSpace(buf.String())
 }
 
-// Info returns version, branch and revision information.
+// Info returns version, branch and commit information.
 func Info() string {
-	return fmt.Sprintf("(branch=%s, revision=%s)", Branch, GetRevision())
+	return fmt.Sprintf("(branch=%s, commit=%s)", Branch, GetCommit())
 }
 
 // BuildContext returns Go version, platform and build tags information.
@@ -63,7 +66,7 @@ func BuildContext() string {
 //	logger.Info("Starting server", version.Slog()...)
 func Slog() []any {
 	return []any{
-		"revision", GetRevision(),
+		"commit", GetCommit(),
 		"branch", Branch,
 		"goversion", GoVersion,
 		"goos", GoOS,
@@ -71,11 +74,11 @@ func Slog() []any {
 	}
 }
 
-// GetRevision returns the revision string, preferring the injected Revision
+// GetCommit returns the commit string, preferring the injected Commit
 // variable over the auto-detected value from debug.ReadBuildInfo().
-func GetRevision() string {
-	if Revision != "" {
-		return Revision
+func GetCommit() string {
+	if Commit != "" {
+		return Commit
 	}
 	return computedRevision
 }
